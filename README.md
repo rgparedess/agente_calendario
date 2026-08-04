@@ -1,4 +1,4 @@
-# calendario_ics
+# agente_calendario
 
 Agente conversacional para gestionar eventos del calendario.
 Conversational agent to manage calendar events.

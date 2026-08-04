@@ -1,2 +1,56 @@
-# agente_calendario
-Agente conversacional para gestionar eventos del calendario. Utiliza un modelo de lenguaje (LLM) para interpretar instrucciones en lenguaje natural, genera un JSON con la acción y los parámetros, y ejecuta la operación correspondiente sobre el archivo ICS de KOrganizer a través del módulo calendario_ics (su backend).
+# calendario_ics
+
+Agente conversacional para gestionar eventos del calendario.
+Conversational agent to manage calendar events.
+
+Utiliza un modelo de lenguaje (LLM) para interpretar instrucciones en lenguaje natural,
+It uses a language model (LLM) to interpret natural language instructions,
+
+genera un JSON con la acción y los parámetros, y ejecuta la operación correspondiente
+generates a JSON with the action and parameters, and executes the corresponding operation
+
+sobre el archivo ICS de KOrganizer a través del módulo calendario_ics (su backend).
+on the KOrganizer ICS file through the calendario_ics module (its backend).
+
+## Instalación / Installation
+
+```bash
+pip install agente_calendario
+```
+
+## Dependencias / Dependencies
+
+calendario_ics (se instala automáticamente / installed automatically)
+
+Servidor llama.cpp en ejecución / llama.cpp server running
+
+## Uso / Usage
+
+```bash
+
+calendario-agent --host 127.0.0.1 --port 8082
+```
+
+### `LICENSE`
+
+MIT License
+
+Copyright (c) 2026 Reinel G. Paredes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

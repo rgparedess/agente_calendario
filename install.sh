@@ -17,13 +17,18 @@ install_script() {
     local dest="$INSTALL_DIR/$name"
     
     echo "Instalando $name en $dest..."
-    # Copiar el archivo .py
     cp "$src" "$dest"
-    # Hacerlo ejecutable
     chmod +x "$dest"
 }
 
-# Instalar agente_calendario (si existe)
+# Instalar calendario_ics (backend) - SIEMPRE primero
+if [ -f "calendario_ics.py" ]; then
+    install_script "calendario_ics.py" "calendario_ics.py"
+else
+    echo "Advertencia: calendario_ics.py no encontrado en el directorio actual."
+fi
+
+# Instalar agente_calendario
 if [ -f "agente_calendario.py" ]; then
     install_script "agente_calendario.py" "calendario-agent"
 else

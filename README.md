@@ -18,6 +18,14 @@ on the KOrganizer ICS file through the calendario_ics module (its backend).
 pip install agente_calendario
 ```
 
+### Con script / With script
+```bash
+
+# Copiar el script al directorio donde están los .py
+chmod +x install.sh
+./install.sh
+```
+
 ## Dependencias / Dependencies
 
 calendario_ics (se instala automáticamente / installed automatically)
@@ -32,7 +40,9 @@ Servidor llama.cpp en ejecución / llama.cpp server running
 
 # Usando la dirección y puerto por defecto (127.0.0.1:8082)
 calendario-agent
+```
 
+```bash
 # Especificando host y puerto / Specifying host and port
 calendario-agent --host 192.168.1.10 --port 8080
 ```

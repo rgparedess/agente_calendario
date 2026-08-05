@@ -26,9 +26,65 @@ Servidor llama.cpp en ejecución / llama.cpp server running
 
 ## Uso / Usage
 
+# Iniciar el agente / Start the agent
+
 ```bash
 
-calendario-agent --host 127.0.0.1 --port 8082
+# Usando la dirección y puerto por defecto (127.0.0.1:8082)
+calendario-agent
+
+# Especificando host y puerto / Specifying host and port
+calendario-agent --host 192.168.1.10 --port 8080
+```
+
+## Ejemplo de sesión interactiva / Interactive session example
+
+```bash
+
+$ calendario-agent --host 127.0.0.1 --port 8082
+======================================================================
+AGENTE CONVERSACIONAL PARA EL CALENDARIO KORGANIZER (con LLM)
+======================================================================
+Servidor LLM: 127.0.0.1:8082
+Escribe instrucciones en lenguaje natural.
+Ejemplos:
+  - 'Lista los eventos de hoy'
+  - 'Agrega una reunión mañana desde las 10:00 hasta las 12:45'
+  - 'Elimina el evento con UID agente-123'
+  - 'Muestra el evento con UID agente-456'
+  - 'Modifica el evento con UID agente-789...'
+
+Escribe 'salir' para terminar.
+
+>>> Lista los eventos de hoy
+[*] Enviando petición al LLM...
+[*] JSON recibido:
+{
+  "accion": "list",
+  "parametros": {
+    "start": "2026-08-05",
+    "end": "2026-08-05"
+  }
+}
+[*] Comando equivalente: python calendario_ics.py list --start 2026-08-05 --end 2026-08-05
+Eventos en Calendario personal:
+  UID: agente-1785259076207415.149974 | Reunión con equipo | 2026-08-05 15:00 -> 2026-08-05 18:43
+
+>>> Agrega una reunión mañana a las 10:00 hasta las 11:30 en la oficina
+[*] Enviando petición al LLM...
+[*] JSON recibido:
+{
+  "accion": "add",
+  "parametros": {
+    "summary": "Reunión en oficina",
+    "dtstart": "2026-08-06 10:00",
+    "dtend": "2026-08-06 11:30",
+    "location": "oficina"
+  }
+}
+[*] Comando equivalente: python calendario_ics.py add --summary "Reunión en oficina" --dtstart "2026-08-06 10:00" --dtend "2026-08-06 11:30" --location "oficina"
+Evento agregado con UID: agente-1785259076207415.149974
+
 ```
 
 ### `LICENSE`

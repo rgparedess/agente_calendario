@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Copyright (c) 2026 Reinel G. Paredes
+# 
+# Este código está bajo la licencia MIT. Consulte el archivo LICENSE para más detalles.
+
 """
 Agente conversacional para gestionar eventos del calendario.
 Utiliza un modelo de lenguaje (LLM) para interpretar instrucciones en lenguaje natural,

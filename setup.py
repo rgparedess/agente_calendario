@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="agente_calendario",
-    version="1.0.0",
+    version="1.0.1",
     author="Reinel G. Paredes",
     author_email="reinelgparedes@gmail.com",
     description="Asistente conversacional para KOrganizer usando LLM local / Conversational assistant for KOrganizer using local LLM",

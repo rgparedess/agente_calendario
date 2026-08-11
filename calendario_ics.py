@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Copyright (c) 2026 Reinel G. Paredes
+# 
+# Este código está bajo la licencia MIT. Consulte el archivo LICENSE para más detalles.
+
 """
-Módulo para gestionar eventos en archivos .ics de KOrganizer.
+Módulo para gestionar eventos en archivos .ics del calendario.
 Proporciona operaciones CRUD (crear, leer, actualizar, eliminar) sobre eventos
-almacenados en archivos iCalendar (.ics) en el directorio de KOrganizer.
+almacenados en archivos iCalendar (.ics) en el directorio del calendario.
 Todas las funciones devuelven (bool, str) o (uid, str) según corresponda.
 """
 
@@ -13,13 +17,57 @@ import re
 import time
 import argparse
 from datetime import datetime
+import sys
 
 # ============================================================================
 # CONFIGURACIÓN DEL DIRECTORIO DE CALENDARIOS
 # ============================================================================
 
-# Ruta donde KOrganizer guarda los archivos .ics (estándar de KDE)
-KORGANIZER_DIR = os.path.expanduser("~/.local/share/apps/korganizer/")
+def _obtener_ruta_calendarios():
+    """
+    Devuelve la ruta al directorio de calendarios según el sistema operativo.
+    Prioriza la variable de entorno CALENDARIO_ICS_DIR si está definida.
+    """
+    # 1. Variable de entorno (sobrescribe cualquier detección automática)
+    env_dir = os.getenv("CALENDARIO_ICS_DIR")
+    if env_dir:
+        return os.path.expanduser(env_dir)
+
+    # 2. Detección automática por SO
+    if sys.platform.startswith("linux"):
+        # KOrganizer en Linux (KDE)
+        return os.path.expanduser("~/.local/share/apps/korganizer/")
+    elif sys.platform == "win32":
+        # Rainlendar en Windows (versión 2.x)
+        user_profile = os.environ.get("USERPROFILE")
+        if user_profile:
+            # Ruta principal de Rainlendar (carpeta oculta en el perfil)
+            rainlendar_dir = os.path.join(user_profile, ".rainlendar2")
+            # Posibles subcarpetas donde pueden estar los .ics
+            candidatas = [
+                rainlendar_dir,
+                os.path.join(rainlendar_dir, "Calendar"),
+            ]
+            for ruta in candidatas:
+                if os.path.exists(ruta) and os.path.isdir(ruta):
+                    # Verificar si contiene archivos .ics
+                    try:
+                        archivos = [f for f in os.listdir(ruta) if f.lower().endswith('.ics')]
+                        if archivos:
+                            return ruta
+                    except:
+                        pass
+            # Si no hay archivos, devolver la primera que exista
+            for ruta in candidatas:
+                if os.path.exists(ruta) and os.path.isdir(ruta):
+                    return ruta
+    else:
+        # Otros sistemas.
+        return None
+
+
+# Ruta donde se guardan los archivos .ics (estándar)
+CALENDAR_DIR = _obtener_ruta_calendarios()
 
 # ============================================================================
 # UTILIDADES DE ARCHIVOS Y CALENDARIOS
@@ -28,11 +76,13 @@ KORGANIZER_DIR = os.path.expanduser("~/.local/share/apps/korganizer/")
 def obtener_archivos_calendario():
     """
     Devuelve una lista con las rutas completas de todos los archivos .ics
-    encontrados en el directorio de KOrganizer.
+    encontrados en el directorio de calendarios.
     """
-    if not os.path.exists(KORGANIZER_DIR):
+    if CALENDAR_DIR is None:
+            return []
+    if not os.path.exists(CALENDAR_DIR):
         return []
-    return [os.path.join(KORGANIZER_DIR, f) for f in os.listdir(KORGANIZER_DIR)
+    return [os.path.join(CALENDAR_DIR, f) for f in os.listdir(CALENDAR_DIR)
             if f.lower().endswith('.ics')]
 
 def obtener_nombre_calendario(ruta):
@@ -263,7 +313,7 @@ def listar_calendarios():
     """Devuelve una cadena con la lista de calendarios disponibles (archivos .ics)."""
     archivos = obtener_archivos_calendario()
     if not archivos:
-        return f"No se encontraron archivos .ics en {KORGANIZER_DIR}"
+        return f"No se encontraron archivos .ics en {CALENDAR_DIR}. Define la variable de entorno CALENDARIO_ICS_DIR para especificar una ruta personalizada."
     lines = ["Calendarios disponibles:"]
     for ruta in archivos:
         lines.append(f"  {obtener_nombre_calendario(ruta)} -> {ruta}")
@@ -439,7 +489,7 @@ def main():
     Punto de entrada para el uso del módulo como script independiente.
     Proporciona una CLI con subcomandos para cada operación.
     """
-    parser = argparse.ArgumentParser(description="Agente para gestionar eventos .ics de KOrganizer.")
+    parser = argparse.ArgumentParser(description="Agente para gestionar eventos .ics del calendario.")
     subparsers = parser.add_subparsers(dest="comando", required=True)
 
     subparsers.add_parser("calendars", help="Listar calendarios")

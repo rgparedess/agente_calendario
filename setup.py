@@ -8,10 +8,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="agente_calendario",
-    version="1.0.1",
+    version="2.0.0",
     author="Reinel G. Paredes",
     author_email="reinelgparedes@gmail.com",
-    description="Asistente conversacional para KOrganizer usando LLM local / Conversational assistant for KOrganizer using local LLM",
+    description="Agente conversacional para gestionar eventos del calendario usando LLM local. Ejecuta la operacion correspondiente en el archivo .ics del calendario / Conversational agent for managing calendar events using local LLM. Executes the corresponding operation on the calendar ICS file.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/rgparedess/agente_calendario",
@@ -25,7 +25,7 @@ setup(
     python_requires=">=3.6",
     install_requires=[
         "requests>=2.25.0",
-        "calendario_ics>=1.0.0",   # dependencia
+        "calendario_ics>=2.0.0",   # dependencia
     ],
     entry_points={
         "console_scripts": [

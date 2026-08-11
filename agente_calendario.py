@@ -9,7 +9,7 @@
 Agente conversacional para gestionar eventos del calendario.
 Utiliza un modelo de lenguaje (LLM) para interpretar instrucciones en lenguaje natural,
 genera un JSON con la acción y los parámetros, y ejecuta la operación correspondiente
-sobre el archivo ICS de KOrganizer a través del módulo calendario_ics (su backend).
+sobre el archivo ICS del calendario a través del módulo calendario_ics (su backend).
 """
 
 import os
@@ -17,7 +17,9 @@ import sys
 import json
 import argparse
 import re
-import requests
+# import requests
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 
 # Importación de las funciones del módulo de calendario_ics
@@ -115,12 +117,22 @@ def consultar_llm(prompt_usuario, max_tokens=30000, temperature=0.3):
         "n_predict": max_tokens,
         "temperature": temperature,
     }
-    headers = {"Content-Type": "application/json"}
+    # headers = {"Content-Type": "application/json"}
+    data_json = json.dumps(payload).encode('utf-8')
+
+    req = urllib.request.Request(
+        url,
+        data=data_json,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
 
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT_HTTP)
-        resp.raise_for_status()
-        data = resp.json()
+        # resp = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT_HTTP)
+        # resp.raise_for_status()
+        # data = resp.json()
+        with urllib.request.urlopen(req, timeout=TIMEOUT_HTTP) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
         if "choices" in data and data["choices"]:
             msg = data["choices"][0].get("message", {})
             # Se prefiere 'content' o 'reasoning_content' (según el modelo)
@@ -129,6 +141,8 @@ def consultar_llm(prompt_usuario, max_tokens=30000, temperature=0.3):
             return respuesta
         else:
             return None
+    except urllib.error.URLError as e:
+        return None
     except Exception as e:
         return None
 
@@ -324,7 +338,7 @@ def main():
     muestra el JSON y el comando equivalente, y ejecuta la acción.
     """
     print("=" * 70)
-    print("AGENTE CONVERSACIONAL PARA EL CALENDARIO KORGANIZER (con LLM)")
+    print("AGENTE CONVERSACIONAL PARA GESTIONAR EVENTOS DEL CALENDARIO (con LLM)")
     print("=" * 70)
     print("Escribe instrucciones en lenguaje natural.")
     print("Ejemplos:")

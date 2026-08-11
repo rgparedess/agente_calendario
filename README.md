@@ -9,8 +9,21 @@ It uses a language model (LLM) to interpret natural language instructions,
 genera un JSON con la acción y los parámetros, y ejecuta la operación correspondiente
 generates a JSON with the action and parameters, and executes the corresponding operation
 
-sobre el archivo ICS de KOrganizer a través del módulo calendario_ics (su backend).
-on the KOrganizer ICS file through the calendario_ics module (its backend).
+sobre el archivo ICS del calendario a través del módulo calendario_ics (su backend).
+on the calendar ICS file through the calendario_ics module (its backend).
+
+
+## Plataformas Soportadas (Probado con:) / Supported Platforms (Tested with:)
+
+Esta herramienta ha sido probada oficialmente con los siguientes calendarios locales:
+This tool has been officially tested with the following local calendars:
+
+| Sistema Operativo | Aplicación                             | Estado       |
+|-------------------|----------------------------------------|------------- |
+| **Linux**         | KOrganizer (KDE Plasma 6)              | ✅ Probado   |
+| **Windows**       | Rainlendar Lite 2.24.1 (Windows 10/11) | ✅ Probado   |
+| **macOS**         | *No soportado actualmente*             | ❌ Pendiente |
+
 
 ## Instalación / Installation
 
@@ -20,11 +33,53 @@ pip install agente_calendario
 
 ### Con script / With script
 ```bash
-
+# Para Linux / For Linux
 # Copiar el script al directorio donde están los .py
 chmod +x install.sh
 ./install.sh
 ```
+
+```bash
+# Para Windows / For Windows
+# Abrir PowerShell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\install.ps1
+``` 
+
+## Configuración avanzada / Advanced configuration
+
+Puedes especificar una ruta personalizada para los archivos `.ics` usando la variable de entorno `CALENDARIO_ICS_DIR`.  
+You can specify a custom path for the `.ics` files using the `CALENDARIO_ICS_DIR` environment variable.
+
+```bash
+# Linux / macOS
+export CALENDARIO_ICS_DIR="/ruta/a/tus/calendarios"
+```
+```bash
+# Windows (PowerShell)
+$env:CALENDARIO_ICS_DIR="C:\ruta\a\tus\calendarios"
+```
+
+```bash
+# Windows (CMD)
+set CALENDARIO_ICS_DIR=C:\ruta\a\tus\calendarios
+```
+
+Si no se define, el agente intentará detectar automáticamente la ruta según tu sistema operativo:
+
+    Linux: ~/.local/share/apps/korganizer/
+
+    Windows:  %USERPROFILE%\.rainlendar2\ (o su subcarpeta Calendar)
+
+    macOS: No hay una ruta estándar para archivos ICS sueltos; usa la variable de entorno.
+
+If not set, the agent will try to auto-detect the path based on your OS:
+
+    Linux: ~/.local/share/apps/korganizer/
+
+    Windows: %USERPROFILE%\.rainlendar2\ 
+
+    macOS: No standard path for loose ICS files; use the environment variable.
 
 ## Dependencias / Dependencies
 
@@ -53,7 +108,7 @@ calendario-agent --host 192.168.1.10 --port 8080
 
 $ calendario-agent --host 127.0.0.1 --port 8082
 ======================================================================
-AGENTE CONVERSACIONAL PARA EL CALENDARIO KORGANIZER (con LLM)
+AGENTE CONVERSACIONAL PARA EL CALENDARIO (con LLM)
 ======================================================================
 Servidor LLM: 127.0.0.1:8082
 Escribe instrucciones en lenguaje natural.

@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="agente_calendario",
-    version="2.0.0",
+    version="2.1.0",
     author="Reinel G. Paredes",
     author_email="reinelgparedes@gmail.com",
     description="Agente conversacional para gestionar eventos del calendario usando LLM local. Ejecuta la operacion correspondiente en el archivo .ics del calendario / Conversational agent for managing calendar events using local LLM. Executes the corresponding operation on the calendar ICS file.",
@@ -25,7 +25,7 @@ setup(
     python_requires=">=3.6",
     install_requires=[
         "requests>=2.25.0",
-        "calendario_ics>=2.0.0",   # dependencia
+        "calendario_ics>=2.1.0",   # dependencia
     ],
     entry_points={
         "console_scripts": [

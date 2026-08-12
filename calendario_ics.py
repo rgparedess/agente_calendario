@@ -18,6 +18,35 @@ import time
 import argparse
 from datetime import datetime
 import sys
+import logging
+from pathlib import Path
+
+# ============================================================================
+# CONFIGURACIÓN DE LOGGING
+# ============================================================================
+
+def get_log_path():
+    """Devuelve la ruta del directorio de logs según el SO (sin permisos especiales)."""
+    if sys.platform.startswith("linux"):
+        log_dir = Path.home() / ".local" / "share" / "calendario_agent" / "logs"
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", os.path.expanduser("~\\AppData\\Roaming"))
+        log_dir = Path(appdata) / "calendario_agent" / "logs"
+    else:
+        # macOS u otros
+        log_dir = Path.home() / ".local" / "share" / "calendario_agent" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "calendario_ics.log"
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(get_log_path()),
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CONFIGURACIÓN DEL DIRECTORIO DE CALENDARIOS
@@ -79,8 +108,10 @@ def obtener_archivos_calendario():
     encontrados en el directorio de calendarios.
     """
     if CALENDAR_DIR is None:
+            logger.warning("CALENDAR_DIR es None. No se encontró una ruta de calendarios.")
             return []
     if not os.path.exists(CALENDAR_DIR):
+        logger.warning(f"El directorio {CALENDAR_DIR} no existe.")
         return []
     return [os.path.join(CALENDAR_DIR, f) for f in os.listdir(CALENDAR_DIR)
             if f.lower().endswith('.ics')]
@@ -117,7 +148,8 @@ def leer_archivo_ics(ruta):
     try:
         with open(ruta, 'r', encoding='utf-8') as f:
             return f.read()
-    except Exception:
+    except Exception as e:
+        logger.exception(f"Error al leer {ruta}")
         return None
 
 def escribir_archivo_ics(ruta, contenido):
@@ -126,7 +158,8 @@ def escribir_archivo_ics(ruta, contenido):
         with open(ruta, 'w', encoding='utf-8') as f:
             f.write(contenido)
         return True
-    except Exception:
+    except Exception as e:
+        logger.exception(f"Error al escribir {ruta}")
         return False
 
 # ============================================================================
@@ -313,7 +346,9 @@ def listar_calendarios():
     """Devuelve una cadena con la lista de calendarios disponibles (archivos .ics)."""
     archivos = obtener_archivos_calendario()
     if not archivos:
-        return f"No se encontraron archivos .ics en {CALENDAR_DIR}. Define la variable de entorno CALENDARIO_ICS_DIR para especificar una ruta personalizada."
+        msg = f"No se encontraron archivos .ics en {CALENDAR_DIR}. Define la variable de entorno CALENDARIO_ICS_DIR para especificar una ruta personalizada."
+        logger.warning(msg)
+        return msg
     lines = ["Calendarios disponibles:"]
     for ruta in archivos:
         lines.append(f"  {obtener_nombre_calendario(ruta)} -> {ruta}")
@@ -327,7 +362,9 @@ def listar_eventos(calendario=None, start=None, end=None):
     """
     archivos = [encontrar_calendario(calendario)] if calendario else obtener_archivos_calendario()
     if not archivos:
-        return "No se encontraron calendarios."
+        msg = "No se encontraron calendarios."
+        logger.warning(msg)
+        return msg
     output = []
     for ruta in archivos:
         if not ruta or not os.path.exists(ruta):
@@ -366,10 +403,14 @@ def agregar_evento(calendario=None, evento=None):
         evento = {}
     ruta = encontrar_calendario(calendario)
     if not ruta:
-        return None, "Calendario no encontrado."
+        msg = "Calendario no encontrado."
+        logger.error(msg)
+        return None, msg
     contenido = leer_archivo_ics(ruta)
     if contenido is None:
-        return None, f"Error al leer {ruta}"
+        msg = f"Error al leer {ruta}"
+        logger.error(msg)
+        return None, msg
     uid = generar_uid()
     bloque = construir_evento_ics(evento, uid)
     # Insertar el bloque antes del END:VCALENDAR o al final del archivo
@@ -378,8 +419,11 @@ def agregar_evento(calendario=None, evento=None):
     else:
         contenido += "\r\n" + bloque
     if escribir_archivo_ics(ruta, contenido):
+        logger.info(f"Evento agregado con UID: {uid}")
         return uid, f"Evento agregado con UID: {uid}"
-    return None, "Error al escribir el archivo."
+    msg = "Error al escribir el archivo."
+    logger.error(msg)
+    return None, msg
 
 def mostrar_evento(uid, calendario=None):
     """
@@ -401,7 +445,9 @@ def mostrar_evento(uid, calendario=None):
                         v = v.strftime("%Y-%m-%d %H:%M")
                     lines.append(f"  {k}: {v}")
                 return "\n".join(lines)
-    return f"Evento con UID {uid} no encontrado."
+    msg = f"Evento con UID {uid} no encontrado."
+    logger.warning(msg)
+    return msg
 
 def modificar_evento(uid, calendario=None, **kwargs):
     """
@@ -413,7 +459,9 @@ def modificar_evento(uid, calendario=None, **kwargs):
     if calendario:
         ruta = encontrar_calendario(calendario)
         if not ruta:
-            return False, "Calendario no encontrado."
+            msg = "Calendario no encontrado."
+            logger.error(msg)
+            return False, msg
         archivos_a_buscar = [ruta]
     else:
         archivos_a_buscar = obtener_archivos_calendario()
@@ -440,10 +488,15 @@ def modificar_evento(uid, calendario=None, **kwargs):
             # Reconstruir el archivo completo con la lista de eventos modificada
             nuevo_contenido = _reconstruir_archivo(contenido, eventos)
             if escribir_archivo_ics(ruta, nuevo_contenido):
+                logger.info(f"Evento {uid} modificado.")
                 return True, f"Evento {uid} modificado."
             else:
-                return False, "Error al escribir el archivo."
-    return False, f"Evento con UID {uid} no encontrado."
+                msg = "Error al escribir el archivo."
+                logger.error(msg)
+                return False, msg
+    msg = f"Evento con UID {uid} no encontrado."
+    logger.warning(msg)
+    return False, msg
 
 def eliminar_evento(uid, calendario=None):
     """
@@ -454,7 +507,9 @@ def eliminar_evento(uid, calendario=None):
     if calendario:
         ruta = encontrar_calendario(calendario)
         if not ruta:
-            return False, "Calendario no encontrado."
+            msg = "Calendario no encontrado."
+            logger.error(msg)
+            return False, msg
         archivos_a_buscar = [ruta]
     else:
         archivos_a_buscar = obtener_archivos_calendario()
@@ -475,10 +530,15 @@ def eliminar_evento(uid, calendario=None):
             # Reconstruir el archivo sin el evento eliminado
             nuevo_contenido = _reconstruir_archivo(contenido, nuevos_eventos)
             if escribir_archivo_ics(ruta, nuevo_contenido):
+                logger.info(f"Evento {uid} eliminado.")
                 return True, f"Evento {uid} eliminado."
             else:
-                return False, "Error al escribir el archivo."
-    return False, f"Evento con UID {uid} no encontrado."
+                msg = "Error al escribir el archivo."
+                logger.error(msg)
+                return False, msg
+    msg = f"Evento con UID {uid} no encontrado."
+    logger.warning(msg)
+    return False, msg
 
 # ============================================================================
 # INTERFAZ DE LÍNEA DE COMANDOS (argparse)

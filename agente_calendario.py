@@ -20,10 +20,40 @@ import re
 # import requests
 import urllib.request
 import urllib.error
+import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Importación de las funciones del módulo de calendario_ics
 import calendario_ics as cal
+
+# ============================================================================
+# CONFIGURACIÓN DE LOGGING
+# ============================================================================
+
+def get_log_path():
+    """Devuelve la ruta del directorio de logs según el SO."""
+    if sys.platform.startswith("linux"):
+        log_dir = Path.home() / ".local" / "share" / "calendario_agent" / "logs"
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", os.path.expanduser("~\\AppData\\Roaming"))
+        log_dir = Path(appdata) / "calendario_agent" / "logs"
+    else:
+        # macOS u otros
+        log_dir = Path.home() / ".local" / "share" / "calendario_agent" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "calendario_agent.log"
+
+# Configurar logging (archivo + consola)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(get_log_path()),  # Archivo de log
+        logging.StreamHandler()               # Consola (sigue viendo mensajes)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CONFIGURACIÓN DEL SERVIDOR LLM (con argumentos CLI)
@@ -140,10 +170,13 @@ def consultar_llm(prompt_usuario, max_tokens=30000, temperature=0.3):
             historial.append({"role": "assistant", "content": respuesta})
             return respuesta
         else:
+            logger.warning("La respuesta del LLM no contiene 'choices'.")
             return None
     except urllib.error.URLError as e:
+        print("Error de red al conectar con el LLM")
         return None
     except Exception as e:
+        print("Error inesperado en la consulta al LLM")
         return None
 
 # ============================================================================
@@ -365,27 +398,30 @@ def main():
         print("\n[*] Enviando petición al LLM...")
         respuesta = consultar_llm(prompt)
         if not respuesta:
+            logger.error("[!] Error en la comunicación con el LLM.")
             print("[!] Error en la comunicación con el LLM.")
             continue
 
         # Extraer el JSON de la respuesta del modelo
         data = extraer_json(respuesta)
         if not data:
+            logger.error("[\n!] El LLM no devolvió un JSON válido.")
             print("[\n!] El LLM no devolvió un JSON válido.")
-            print("[DEBUG] Respuesta del LLM:")
-            print(respuesta)
+            logger.debug("[DEBUG] Respuesta del LLM:")
+            logger.debug(respuesta)
             continue
 
         # Mostrar el JSON interpretado
-        print("\n[*] JSON recibido:")
-        print(json.dumps(data, indent=2))
+        logger.info("\n[*] JSON recibido:")
+        logger.info(json.dumps(data, indent=2))
 
         # Construir y mostrar el comando equivalente de calendario_ics
         comando_texto = construir_comando_texto(data)
         if comando_texto:
-            print(f"\n[*] Comando equivalente: {comando_texto}\n")
+            logger.info(f"\n[*] Comando equivalente: {comando_texto}\n")
         else:
             print("\n[*] No se pudo construir un comando textual para esta acción.")
+            logger.error("\n[*] No se pudo construir un comando textual para esta acción.")
 
         # Ejecutar la acción y mostrar el resultado
         resultado = ejecutar_accion(data)
@@ -394,6 +430,7 @@ def main():
 if __name__ == "__main__":
     # Verificar la existencia del módulo calendario_ics antes de iniciar
     if not os.path.exists(os.path.join(os.path.dirname(__file__), "calendario_ics.py")):
+        logger.error("Error: No se encuentra calendario_ics.py")
         print("Error: No se encuentra calendario_ics.py")
         sys.exit(1)
     main()

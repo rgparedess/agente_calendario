@@ -108,49 +108,75 @@ calendario-agent --host 192.168.1.10 --port 8080
 
 $ calendario-agent --host 127.0.0.1 --port 8082
 ======================================================================
-AGENTE CONVERSACIONAL PARA EL CALENDARIO (con LLM)
+AGENTE CONVERSACIONAL PARA GESTIONAR EVENTOS DEL CALENDARIO (con LLM)
 ======================================================================
 Servidor LLM: 127.0.0.1:8082
 Escribe instrucciones en lenguaje natural.
 Ejemplos:
   - 'Lista los eventos de hoy'
+  - '¿Cuántos eventos tengo para el 25 de julio?'
   - 'Agrega una reunión mañana desde las 10:00 hasta las 12:45'
-  - 'Elimina el evento con UID agente-123'
-  - 'Muestra el evento con UID agente-456'
-  - 'Modifica el evento con UID agente-789...'
+  - 'Borra el evento con UID agente-123'
+  - 'Elimina la reunión de mañana a las 10:00'
+  - 'Dime los eventos de esta semana'
+  - 'Cambia la reunión del jueves las 10:00 y ponla de las 11:00 a las 12:00'
 
 Escribe 'salir' para terminar.
 
->>> Lista los eventos de hoy
-[*] Enviando petición al LLM...
-[*] JSON recibido:
-{
-  "accion": "list",
-  "parametros": {
-    "start": "2026-08-05",
-    "end": "2026-08-05"
-  }
-}
-[*] Comando equivalente: python calendario_ics.py list --start 2026-08-05 --end 2026-08-05
-Eventos en Calendario personal:
-  UID: agente-1785259076207415.149974 | Reunión con equipo | 2026-08-05 15:00 -> 2026-08-05 18:43
+>>> Agrega una reunión mañana a las 10:00 en Oficina Central
 
->>> Agrega una reunión mañana a las 10:00 hasta las 11:30 en la oficina
 [*] Enviando petición al LLM...
-[*] JSON recibido:
-{
-  "accion": "add",
-  "parametros": {
-    "summary": "Reunión en oficina",
-    "dtstart": "2026-08-06 10:00",
-    "dtend": "2026-08-06 11:30",
-    "location": "oficina"
-  }
-}
-[*] Comando equivalente: python calendario_ics.py add --summary "Reunión en oficina" --dtstart "2026-08-06 10:00" --dtend "2026-08-06 11:30" --location "oficina"
-Evento agregado con UID: agente-1785259076207415.149974
+
+¡Perfecto! He agregado la reunión para mañana a las 10:00 en Oficina Central. ¿Necesitas algo más?
+
+>>> ¿Cuántos eventos tengo para el jueves 25 de julio?
+
+[*] Enviando petición al LLM...
+
+Encontré 3 eventos para el jueves 25 de julio.
+
+>>> Lista los eventos de hoy
+
+[*] Enviando petición al LLM...
+
+Estos son los eventos que tienes agendados para hoy:
+  - Reunión con equipo (10:00 - 11:00)
+  - Almuerzo con cliente (13:00 - 14:00)
+
+>>> Borra la reunión de mañana
+
+[*] Enviando petición al LLM...
+
+Varios eventos coinciden. Elige uno:
+1. Reunión con equipo - 2026-08-17 09:00
+2. Reunión con cliente - 2026-08-17 10:30
+Responde con el número del evento que quieres procesar.
+
+>>> 2
+
+Se ha eliminado la Reunión con cliente del jueves 17 de agosto a las 10:30. ¡Listo!
+
+>>> Cambia la ubicación de la reunión de mañana a Sala 3
+
+[*] Enviando petición al LLM...
+
+Varios eventos coinciden. Elige uno:
+1. Reunión con equipo - 2026-08-17 09:00
+2. Reunión con cliente - 2026-08-17 10:30
+Responde con el número del evento que quieres procesar.
+
+>>> 1
+
+He actualizado la ubicación de la Reunión con equipo a Sala 3. ¿Algo más?
+
+>>> salir
+
+¡Hasta luego!
 
 ```
+
+## Ejemplo visual en el calendario KOrganizer / Visual in KOrganizer calendar
+![Captura de Ejemplo visual en el calendario KOrganizer](docs/images/ejemplo.png)
 
 ### `LICENSE`
 

@@ -541,6 +541,89 @@ def eliminar_evento(uid, calendario=None):
     return False, msg
 
 # ============================================================================
+# BÚSQUEDA Y OPERACIONES POR FILTROS (NUEVO EN v2.2.0)
+# ============================================================================
+
+def buscar_eventos(calendario=None, fecha=None, hora=None, texto=None, ubicacion=None):
+    """
+    Busca eventos que coincidan con los filtros proporcionados.
+    Retorna una lista de eventos (diccionarios completos).
+    """
+    archivos = [encontrar_calendario(calendario)] if calendario else obtener_archivos_calendario()
+    coincidencias = []
+    
+    for ruta in archivos:
+        if not ruta or not os.path.exists(ruta):
+            continue
+        contenido = leer_archivo_ics(ruta)
+        if contenido is None:
+            continue
+        for ev in parsear_eventos(contenido):
+            # Aplicar filtros
+            if fecha:
+                dtstart = ev.get('dtstart')
+                if isinstance(dtstart, datetime):
+                    try:
+                        fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
+                        if dtstart.date() != fecha_obj:
+                            continue
+                    except ValueError:
+                        # Si el formato no es YYYY-MM-DD, intentar con fecha relativa
+                        pass
+            if hora:
+                dtstart = ev.get('dtstart')
+                if isinstance(dtstart, datetime):
+                    if dtstart.strftime("%H:%M") != hora:
+                        continue
+            if texto:
+                texto_lower = texto.lower()
+                if not (texto_lower in ev.get('summary', '').lower() or 
+                        texto_lower in ev.get('description', '').lower()):
+                    continue
+            if ubicacion:
+                if ubicacion.lower() not in ev.get('location', '').lower():
+                    continue
+            coincidencias.append(ev)
+    return coincidencias
+
+def eliminar_por_filtro(calendario=None, filtros=None):
+    """
+    Busca eventos con los filtros y, si hay exactamente uno, lo elimina.
+    Retorna (True/False, mensaje, lista_de_coincidencias) si hay más de uno.
+    """
+    if filtros is None:
+        filtros = {}
+    coincidencias = buscar_eventos(calendario, **filtros)
+    if len(coincidencias) == 0:
+        return False, "No se encontraron eventos con esos criterios.", []
+    elif len(coincidencias) == 1:
+        uid = coincidencias[0]['uid']
+        ok, msg = eliminar_evento(uid, calendario)
+        return ok, msg, []
+    else:
+        return False, "Varios eventos coinciden. Elige uno:", coincidencias
+
+def modificar_por_filtro(calendario=None, filtros=None, cambios=None):
+    """
+    Busca eventos con los filtros y, si hay exactamente uno, lo modifica.
+    Retorna (True/False, mensaje, lista_de_coincidencias) si hay más de uno.
+    """
+    if filtros is None:
+        filtros = {}
+    if cambios is None:
+        cambios = {}
+    coincidencias = buscar_eventos(calendario, **filtros)
+    if len(coincidencias) == 0:
+        return False, "No se encontraron eventos con esos criterios.", []
+    elif len(coincidencias) == 1:
+        uid = coincidencias[0]['uid']
+        ok, msg = modificar_evento(uid, calendario, **cambios)
+        return ok, msg, []
+    else:
+        return False, "Varios eventos coinciden. Elige uno:", coincidencias
+
+
+# ============================================================================
 # INTERFAZ DE LÍNEA DE COMANDOS (argparse)
 # ============================================================================
 
@@ -549,7 +632,7 @@ def main():
     Punto de entrada para el uso del módulo como script independiente.
     Proporciona una CLI con subcomandos para cada operación.
     """
-    parser = argparse.ArgumentParser(description="Agente para gestionar eventos .ics del calendario.")
+    parser = argparse.ArgumentParser(description="Modulo para gestionar eventos del calendario mediante archivos .ics.")
     subparsers = parser.add_subparsers(dest="comando", required=True)
 
     subparsers.add_parser("calendars", help="Listar calendarios")
@@ -568,7 +651,7 @@ def main():
     add_parser.add_argument("--location", default="", help="Ubicación")
     add_parser.add_argument("--priority", type=int, default=0, help="Prioridad")
 
-    mod_parser = subparsers.add_parser("modify", help="Modificar evento")
+    mod_parser = subparsers.add_parser("modify", help="Modificar evento por UID")
     mod_parser.add_argument("uid", help="UID del evento")
     mod_parser.add_argument("--calendar", help="Calendario")
     mod_parser.add_argument("--summary", help="Nuevo título")
@@ -578,21 +661,51 @@ def main():
     mod_parser.add_argument("--location", help="Nueva ubicación")
     mod_parser.add_argument("--priority", type=int, help="Nueva prioridad")
 
-    del_parser = subparsers.add_parser("delete", help="Eliminar evento")
+    del_parser = subparsers.add_parser("delete", help="Eliminar evento por UID")
     del_parser.add_argument("uid", help="UID del evento")
     del_parser.add_argument("--calendar", help="Calendario")
 
-    show_parser = subparsers.add_parser("show", help="Mostrar evento")
+    show_parser = subparsers.add_parser("show", help="Mostrar evento por UID")
     show_parser.add_argument("uid", help="UID del evento")
     show_parser.add_argument("--calendar", help="Calendario")
+
+    search_parser = subparsers.add_parser("search", help="Buscar eventos por filtros")
+    search_parser.add_argument("--calendar", help="Nombre del calendario")
+    search_parser.add_argument("--date", help="Fecha (YYYY-MM-DD)")
+    search_parser.add_argument("--text", help="Texto en título o descripción")
+    search_parser.add_argument("--location", help="Ubicación")
+    search_parser.add_argument("--time", help="Hora (HH:MM)")
+
+    delete_filter_parser = subparsers.add_parser("delete-filter", help="Eliminar eventos por filtros")
+    delete_filter_parser.add_argument("--calendar", help="Nombre del calendario")
+    delete_filter_parser.add_argument("--date", help="Fecha (YYYY-MM-DD)")
+    delete_filter_parser.add_argument("--text", help="Texto en título o descripción")
+    delete_filter_parser.add_argument("--location", help="Ubicación")
+    delete_filter_parser.add_argument("--time", help="Hora (HH:MM)")
+    delete_filter_parser.add_argument("--force", action="store_true", help="Eliminar sin confirmar si hay múltiples")
+
+    modify_filter_parser = subparsers.add_parser("modify-filter", help="Modificar eventos por filtros")
+    modify_filter_parser.add_argument("--calendar", help="Nombre del calendario")
+    modify_filter_parser.add_argument("--date", help="Fecha (YYYY-MM-DD)")
+    modify_filter_parser.add_argument("--text", help="Texto en título o descripción")
+    modify_filter_parser.add_argument("--location", help="Ubicación")
+    modify_filter_parser.add_argument("--time", help="Hora (HH:MM)")
+    modify_filter_parser.add_argument("--summary", help="Nuevo título")
+    modify_filter_parser.add_argument("--description", help="Nueva descripción")
+    modify_filter_parser.add_argument("--dtstart", help="Nuevo inicio (YYYY-MM-DD HH:MM)")
+    modify_filter_parser.add_argument("--dtend", help="Nuevo fin (YYYY-MM-DD HH:MM)")
+    modify_filter_parser.add_argument("--set-location", help="Nueva ubicación")
+    modify_filter_parser.add_argument("--priority", type=int, help="Nueva prioridad")
 
     args = parser.parse_args()
 
     # Ejecutar la acción correspondiente y mostrar el resultado
     if args.comando == "calendars":
         print(listar_calendarios())
+
     elif args.comando == "list":
         print(listar_eventos(args.calendar, args.start, args.end))
+
     elif args.comando == "add":
         evento = {
             'summary': args.summary,
@@ -606,6 +719,7 @@ def main():
             evento['dtend'] = parsear_fecha_hora(args.dtend)
         uid, msg = agregar_evento(args.calendar, evento)
         print(msg)
+
     elif args.comando == "modify":
         kwargs = {}
         for key in ['summary', 'description', 'dtstart', 'dtend', 'location']:
@@ -619,11 +733,99 @@ def main():
             kwargs['priority'] = args.priority
         ok, msg = modificar_evento(args.uid, args.calendar, **kwargs)
         print(msg)
+
     elif args.comando == "delete":
         ok, msg = eliminar_evento(args.uid, args.calendar)
         print(msg)
+
     elif args.comando == "show":
         print(mostrar_evento(args.uid, args.calendar))
+    
+    elif args.comando == "search":
+        filtros = {}
+        if args.date:
+            filtros["fecha"] = args.date
+        if args.text:
+            filtros["texto"] = args.text
+        if args.location:
+            filtros["ubicacion"] = args.location
+        if args.time:
+            filtros["hora"] = args.time
+        eventos = buscar_eventos(args.calendar, **filtros)
+        if not eventos:
+            print("No se encontraron eventos con esos criterios.")
+        else:
+            print(f"Se encontraron {len(eventos)} eventos:")
+            for i, ev in enumerate(eventos, 1):
+                dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
+                ubic = f" (Ubicación: {ev.get('location', 'N/A')})" if ev.get('location') else ""
+                print(f"{i}. {ev['summary']} - {dtstart}{ubic}")
+
+    elif args.comando == "delete-filter":
+        filtros = {}
+        if args.date:
+            filtros["fecha"] = args.date
+        if args.text:
+            filtros["texto"] = args.text
+        if args.location:
+            filtros["ubicacion"] = args.location
+        if args.time:
+            filtros["hora"] = args.time
+        ok, msg, coincidencias = eliminar_por_filtro(args.calendar, filtros)
+        if not ok and coincidencias:
+            print(msg)
+            for i, ev in enumerate(coincidencias, 1):
+                dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
+                print(f"{i}. {ev['summary']} - {dtstart}")
+            if args.force:
+                print("Forzando eliminación de todos...")
+                for ev in coincidencias:
+                    ok2, msg2 = eliminar_evento(ev['uid'], args.calendar)
+                    print(f"  {ev['summary']}: {msg2}")
+            else:
+                print("Usa --force para eliminar todos o ejecuta delete por UID para uno específico.")
+        else:
+            print(msg)
+
+    elif args.comando == "modify-filter":
+        filtros = {}
+        if args.date:
+            filtros["fecha"] = args.date
+        if args.text:
+            filtros["texto"] = args.text
+        if args.location:
+            filtros["ubicacion"] = args.location
+        if args.time:
+            filtros["hora"] = args.time
+
+        cambios = {}
+        if args.summary:
+            cambios["summary"] = args.summary
+        if args.description:
+            cambios["description"] = args.description
+        if args.dtstart:
+            cambios["dtstart"] = parsear_fecha_hora(args.dtstart)
+        if args.dtend:
+            cambios["dtend"] = parsear_fecha_hora(args.dtend)
+        if args.set_location:
+            cambios["location"] = args.set_location
+        if args.priority is not None:
+            cambios["priority"] = args.priority
+        if not cambios:
+            print("Error: no se especificaron cambios.")
+            return
+        ok, msg, coincidencias = modificar_por_filtro(args.calendar, filtros, cambios)
+        if not ok and coincidencias:
+            print(msg)
+            for i, ev in enumerate(coincidencias, 1):
+                dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
+                print(f"{i}. {ev['summary']} - {dtstart}")
+            print("El CLI no soporta modificación interactiva. Usa el agente o modifica por UID.")
+        else:
+            print(msg)
+
+    else:
+        print(f"Comando no reconocido: {args.comando}")
 
 if __name__ == "__main__":
     main()

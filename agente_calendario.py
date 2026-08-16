@@ -588,10 +588,12 @@ def main():
     print("Escribe instrucciones en lenguaje natural.")
     print("Ejemplos:")
     print("  - 'Lista los eventos de hoy'")
+    print("  - '¿Cuántos eventos tengo para el 25 de julio?'")
     print("  - 'Agrega una reunión mañana desde las 10:00 hasta las 12:45'")
-    print("  - 'Elimina el evento con UID agente-123'")
-    print("  - 'Muestra el evento con UID agente-456'")
-    print("  - 'Modifica el evento con UID agente-789...'")
+    print("  - 'Borra el evento con UID agente-123'")
+    print("  - 'Elimina la reunión de mañana a las 10:00'")
+    print("  - 'Dime los eventos de esta semana'")
+    print("  - 'Cambia la reunión del jueves las 10:00 y ponla de las 11:00 a las 12:00'")
     print("\nEscribe 'salir' para terminar.\n")
 
     while True:

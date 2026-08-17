@@ -23,6 +23,7 @@ import urllib.error
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+import calendar
 
 # Importación de las funciones del módulo de calendario_ics
 import calendario_ics as cal
@@ -82,7 +83,7 @@ BASE_URL = f"http://{HOST}:{PORT}/v1"
 TIMEOUT_HTTP = None
 
 # Número máximo de mensajes en el historial de conversación (para no saturar el contexto)
-MAX_HISTORIAL = 6
+MAX_HISTORIAL = 4
 
 # ============================================================================
 # HISTORIAL DE CONVERSACIÓN (estado de la sesión)
@@ -96,66 +97,34 @@ def inicializar_historial():
     Construye el mensaje inicial del sistema con la fecha actual y ejemplos
     de formato de respuesta (JSON). Este mensaje se mantiene al inicio del historial.
     """
-    hoy = datetime.now()
-    hoy_str = hoy.strftime("%Y-%m-%d")
-    manana = (hoy + timedelta(days=1)).strftime("%Y-%m-%d")
-    ayer = (hoy - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Prompt del sistema: define la estructura esperada del JSON y da ejemplos
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    dia = calendar.day_name[datetime.now().weekday()]
+
     system_prompt = f"""
-    Hoy es {hoy_str}. Ayer {ayer}. Mañana {manana}.
+    Hoy es {dia} {hoy}
 
-    Responde SOLO con un JSON valido. Las acciones disponibles son:
+    Eres un asistente que gestiona un calendario. Tienes estas funciones disponibles:
 
-    ================================================================================
-    **list** - Lista eventos con filtros opcionales (start, end, calendar)
-    Ejemplo 1: {{"accion":"list","parametros":{{"start":"{hoy_str}","end":"{hoy_str}"}}}}
-    Ejemplo 2: {{"accion":"list","parametros":{{"calendar":"personal","start":"{hoy_str}","end":"{manana}"}}}}
+    - **listar_eventos(calendar=None, start=None, end=None)**: Lista eventos en un rango de fechas.
+    - **buscar_eventos(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None)**: Busca eventos con filtros.
+    - **contar_eventos(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None)**: Cuenta eventos que coinciden con filtros.
+    - **agregar_evento(summary, dtstart, dtend=None, location=None, priority=0, calendar=None)**: Agrega un nuevo evento.
+    - **eliminar_por_filtro(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None, calendar=None)**: Elimina eventos que coinciden con filtros.
+    - **modificar_por_filtro(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None, calendar=None, summary=None, description=None, dtstart=None, dtend=None, location=None, priority=None)**: Modifica eventos que coinciden con los filtros.
+    - **eliminar_evento(uid, calendar=None)**: Elimina un evento por su UID.
+    - **mostrar_evento(uid, calendar=None)**: Muestra detalles de un evento por UID.
+    - **modificar_evento(uid, calendar=None, **kwargs)**: Modifica un evento por UID.
 
-    ================================================================================
-    **buscar** - Busca eventos por fecha, texto, ubicación o hora (devuelve lista resumida)
-    Ejemplo 1: {{"accion":"buscar","parametros":{{"fecha":"{hoy_str}"}}}}
-    Ejemplo 2: {{"accion":"buscar","parametros":{{"texto":"reunión","fecha":"{hoy_str}"}}}}
-    Ejemplo 3: {{"accion":"buscar","parametros":{{"ubicacion":"oficina","fecha":"{manana}"}}}}
-    Ejemplo 4: {{"accion":"buscar","parametros":{{"hora":"15:00","fecha":"{hoy_str}"}}}}
+    Responde SOLO con un JSON que contenga "accion" (nombre de la función) y "parametros" (diccionario con los argumentos).
 
-    ================================================================================
-    **contar** - Cuenta eventos que coinciden con los filtros (similar a buscar)
-    Ejemplo: {{"accion":"contar","parametros":{{"fecha":"{hoy_str}"}}}}
-
-    ================================================================================
-    **eliminar_por_filtro** - Elimina un evento SIN UID, usando filtros (fecha, hora, texto, ubicacion)
-    Ejemplo 1: {{"accion":"eliminar_por_filtro","parametros":{{"fecha":"{manana}","hora":"08:00","texto":"reunión"}}}}
-    Ejemplo 2: {{"accion":"eliminar_por_filtro","parametros":{{"fecha":"{hoy_str}","ubicacion":"Casa 1"}}}}
-
-    ================================================================================
-    **modificar_por_filtro** - Modifica un evento SIN UID, usando filtros y cambios
-    Ejemplo 1: {{"accion":"modificar_por_filtro","parametros":{{"fecha":"{hoy_str}","hora":"15:00","cambios":{{"summary":"Nuevo título","dtstart":"{hoy_str} 16:00"}}}}}}
-    Ejemplo 2: {{"accion":"modificar_por_filtro","parametros":{{"fecha":"{manana}","texto":"reunión","cambios":{{"location":"Sala 2","priority":3}}}}}}
-
-    ================================================================================
-    **add** - Agrega un nuevo evento (requiere summary y dtstart)
-    Ejemplo: {{"accion":"add","parametros":{{"summary":"Reunión con cliente","dtstart":"{hoy_str} 10:00","dtend":"{hoy_str} 11:00","location":"Oficina","priority":2}}}}
-
-    ================================================================================
-    **delete** - Elimina un evento por su UID (SOLO si el usuario lo proporciona explícitamente)
-    Ejemplo: {{"accion":"delete","parametros":{{"uid":"agente-1234567890.1234"}}}}
-
-    ================================================================================
-    **show** - Muestra los detalles de un evento por su UID (SOLO si el usuario lo proporciona)
-    Ejemplo: {{"accion":"show","parametros":{{"uid":"agente-1234567890.1234"}}}}
-
-    ================================================================================
-    **modify** - Modifica un evento por su UID (SOLO si el usuario lo proporciona)
-    Ejemplo: {{"accion":"modify","parametros":{{"uid":"agente-1234567890.1234","summary":"Nuevo título","dtstart":"{manana} 09:00"}}}}
-
-    ================================================================================
-    REGLAS IMPORTANTES:
-    - SIEMPRE prefiere usar filtros (fecha, hora, texto, ubicacion) en lugar de UID cuando sea posible.
-    - Si la instrucción es ambigua, usa filtros amplios.
-    - Si hay múltiples coincidencias al eliminar/modificar por filtro, el agente mostrará la lista y preguntará al usuario.
-    - Para DELETE, SHOW, MODIFY solo usa UID cuando el usuario lo escriba explícitamente (ej: "elimina el evento con UID agente-123").
-    - Para el resto de casos, usa eliminar_por_filtro o modificar_por_filtro.
+    REGLAS:
+    - Usa exactamente los nombres de funciones y parámetros descritos. Si no estás seguro, elige la función más parecida, pero no inventes ninguna.
+    - Prefiere usar filtros (fecha, texto, ubicación, hora) en lugar de UID cuando sea posible.
+    - mostrar_evento y modificar_evento SOLO aceptan uid. No aceptan fecha, texto, ni ningún otro filtro.
+    - Si el usuario pide detalles de un evento por fecha, texto o ubicación, usa buscar_eventos primero. Luego, si encuentras un solo evento, puedes mostrar sus detalles con mostrar_evento(uid=...).
+    - Si hay múltiples coincidencias al eliminar/modificar, el agente te pedirá que elijas y el usuario pondrá el número de su opción.
+    - Los eventos tienen "priority" (0-9). Si el usuario pregunta por el más importante, usa buscar_eventos y luego filtra por mayor priority.
     """
     
     global historial
@@ -168,7 +137,7 @@ inicializar_historial()
 # CONSULTA AL LLM
 # ============================================================================
 
-def consultar_llm(prompt_usuario, max_tokens=30000, temperature=0.3, guardar_historial=True, system_prompt_override=None):
+def consultar_llm(prompt_usuario, max_tokens=2000, temperature=0.0, guardar_historial=True, system_prompt_override=None):
     """
     Envía el prompt del usuario al servidor LLM y devuelve la respuesta en texto.
     Los parámetros de generación (max_tokens, temperature, guardar_historial) controlan la salida.
@@ -324,164 +293,31 @@ def extraer_cualquier_json(texto):
     return None
 
 # ============================================================================
-# CONSTRUCCIÓN DEL COMANDO TEXTO PARA MOSTRAR AL USUARIO
-# ============================================================================
-
-def construir_comando_texto(data):
-    """
-    Convierte el JSON de acción/parámetros en un comando de shell equivalente
-    para el script calendario_ics.py. Se usa únicamente para información visual.
-    """
-    accion = data.get("accion")
-    params = data.get("parametros", {})
-
-    if accion == "calendars":
-        return "python calendario_ics.py calendars"
-
-    elif accion == "list":
-        cmd = "python calendario_ics.py list"
-        if params.get("start"):
-            cmd += f" --start {params['start']}"
-        if params.get("end"):
-            cmd += f" --end {params['end']}"
-        return cmd
-
-    elif accion == "add":
-        cmd = f"python calendario_ics.py add --summary \"{params.get('summary', 'Evento')}\""
-        if params.get("dtstart"):
-            cmd += f" --dtstart \"{params['dtstart']}\""
-        if params.get("dtend"):
-            cmd += f" --dtend \"{params['dtend']}\""
-        if params.get("location"):
-            cmd += f" --location \"{params['location']}\""
-        if params.get("description"):
-            cmd += f" --description \"{params['description']}\""
-        return cmd
-
-    elif accion == "delete":
-        uid = params.get("uid")
-        if not uid:
-            return None
-        return f"python calendario_ics.py delete {uid}"
-
-    elif accion == "show":
-        uid = params.get("uid")
-        if not uid:
-            return None
-        return f"python calendario_ics.py show {uid}"
-
-    elif accion == "modify":
-        uid = params.get("uid")
-        if not uid:
-            return None
-        cmd = f"python calendario_ics.py modify {uid}"
-        if params.get("summary"):
-            cmd += f" --summary \"{params['summary']}\""
-        if params.get("dtstart"):
-            cmd += f" --dtstart \"{params['dtstart']}\""
-        if params.get("dtend"):
-            cmd += f" --dtend \"{params['dtend']}\""
-        if params.get("location"):
-            cmd += f" --location \"{params['location']}\""
-        return cmd
-
-    else:
-        return None
-
-# ============================================================================
 # EJECUTOR DE ACCIÓN: LLAMA A LAS FUNCIONES DEL MÓDULO calendario_ics
 # ============================================================================
 
 def ejecutar_accion(data):
-    """
-    Interpreta el JSON y llama a la función correspondiente de calendario_ics.
-    Devuelve el mensaje resultado de la operación.
-    """
     accion = data.get("accion")
     params = data.get("parametros", {})
 
-    if accion == "calendars":
-        return cal.listar_calendarios()
+    # Mapeo de nombres a funciones
+    funciones = {
+        "listar_eventos": cal.listar_eventos,
+        "buscar_eventos": cal.buscar_eventos,
+        "contar_eventos": cal.contar_eventos,  # nueva función que devuelve solo el número
+        "agregar_evento": cal.agregar_evento,
+        "eliminar_por_filtro": cal.eliminar_por_filtro,
+        "modificar_por_filtro": cal.modificar_por_filtro,
+        "eliminar_evento": cal.eliminar_evento,
+        "mostrar_evento": cal.mostrar_evento,
+        "modificar_evento": cal.modificar_evento,
+    }
 
-    elif accion == "list":
-        return cal.listar_eventos(
-            calendario=params.get("calendar"),
-            start=params.get("start"),
-            end=params.get("end")
-        )
-
-    elif accion == "add":
-        evento = {
-            'summary': params.get("summary", "Evento"),
-            'description': params.get("description", ""),
-            'location': params.get("location", ""),
-            'priority': params.get("priority", 0),
-        }
-        if params.get("dtstart"):
-            evento['dtstart'] = cal.parsear_fecha_hora(params["dtstart"])
-        if params.get("dtend"):
-            evento['dtend'] = cal.parsear_fecha_hora(params["dtend"])
-        uid, msg = cal.agregar_evento(
-            calendario=params.get("calendar"),
-            evento=evento
-        )
-        return msg
-
-    elif accion == "delete":
-        uid = params.get("uid")
-        if not uid:
-            return "Error: falta UID"
-        ok, msg = cal.eliminar_evento(uid, calendario=params.get("calendar"))
-        return msg
-
-    elif accion == "show":
-        uid = params.get("uid")
-        if not uid:
-            return "Error: falta UID"
-        return cal.mostrar_evento(uid, calendario=params.get("calendar"))
-
-    elif accion == "modify":
-        uid = params.get("uid")
-        if not uid:
-            return "Error: falta UID"
-        kwargs = {}
-        for key in ['summary', 'description', 'dtstart', 'dtend', 'location']:
-            if key in params and params[key]:
-                if key in ['dtstart', 'dtend']:
-                    kwargs[key] = cal.parsear_fecha_hora(params[key])
-                else:
-                    kwargs[key] = params[key]
-        if 'priority' in params:
-            kwargs['priority'] = params['priority']
-        ok, msg = cal.modificar_evento(uid, calendario=params.get("calendar"), **kwargs)
-        return msg
-
-    elif accion == "buscar" or accion == "contar":
-        filtros = {}
-        if params.get("fecha"):
-            filtros["fecha"] = params["fecha"]
-        if params.get("texto"):
-            filtros["texto"] = params["texto"]
-        if params.get("ubicacion"):
-            filtros["ubicacion"] = params["ubicacion"]
-        if params.get("hora"):
-            filtros["hora"] = params["hora"]
-        
-        eventos = cal.buscar_eventos(**filtros)
-        if accion == "contar":
-            return f"Encontré {len(eventos)} eventos."
-        else:
-            if not eventos:
-                return "No encontré eventos con esos criterios."
-            lines = ["Eventos encontrados:"]
-            for i, ev in enumerate(eventos, 1):
-                dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
-                ubic = f" (Ubicación: {ev.get('location', 'N/A')})" if ev.get('location') else ""
-                lines.append(f"{i}. {ev['summary']} - {dtstart}{ubic}")
-            return "\n".join(lines)
+    if accion not in funciones:
+        return f"Acción no reconocida: {accion}"
 
     elif accion == "eliminar_por_filtro":
-        filtros = {k: params[k] for k in ["fecha", "hora", "texto", "ubicacion"] if k in params}
+        filtros = {k: params[k] for k in ["fecha", "hora", "texto", "ubicacion", "start", "end"] if k in params}
         ok, msg, coincidencias = cal.eliminar_por_filtro(
             calendario=params.get("calendar"), 
             filtros=filtros
@@ -490,12 +326,12 @@ def ejecutar_accion(data):
             return {
                 "mensaje": msg,
                 "coincidencias": coincidencias,
-                "accion": "delete"   # <-- guardamos la acción
+                "accion": "delete"
             }
         return msg
 
     elif accion == "modificar_por_filtro":
-        filtros = {k: params[k] for k in ["fecha", "hora", "texto", "ubicacion"] if k in params}
+        filtros = {k: params[k] for k in ["fecha", "hora", "texto", "ubicacion", "start", "end"] if k in params}
         cambios = params.get("cambios", {})
         ok, msg, coincidencias = cal.modificar_por_filtro(
             calendario=params.get("calendar"),
@@ -506,13 +342,21 @@ def ejecutar_accion(data):
             return {
                 "mensaje": msg,
                 "coincidencias": coincidencias,
-                "accion": "modify",      # <-- guardamos la acción
-                "cambios": cambios       # <-- guardamos los cambios
+                "accion": "modify",
+                "cambios": cambios
             }
         return msg
 
-    else:
-        return f"Acción no reconocida: {accion}"
+    # Llamar a la función con los parámetros
+    funcion = funciones[accion]
+    try:
+        resultado = funcion(**params)
+        # Si es un tuple (uid, msg), devolver msg
+        if isinstance(resultado, tuple) and len(resultado) == 2:
+            return resultado[1]
+        return resultado
+    except Exception as e:
+        return f"Error al ejecutar {accion}: {e}"
 
 
 # ============================================================================
@@ -521,9 +365,9 @@ def ejecutar_accion(data):
 
 # System prompt alternativo para el formateo conversacional
 SYSTEM_PROMPT_FORMATEO = """
-Eres un asistente conversacional amable y cercano. Tu única tarea es redactar respuestas para el usuario basándote en los resultados de las acciones que el sistema ha ejecutado.
+Eres un asistente conversacional cubano, amable y cercano. Tu única tarea es redactar respuestas para el usuario basándote en los resultados de las acciones que el sistema ha ejecutado.
 
-No generes comandos, ni acciones, ni JSON con "accion". Solo debes devolver un JSON con una clave "respuesta" que contenga un mensaje en lenguaje natural.
+No generes comandos, ni acciones, ni JSON con "accion". Solo debes devolver un JSON con una clave "respuesta" que contenga un mensaje en lenguaje natural y no pienses más de 2 veces para responder.
 
 Ejemplo:
 Si el sistema te dice: "El evento se agregó correctamente con UID: 123", tu respuesta debe ser:
@@ -532,6 +376,7 @@ Si el sistema te dice: "El evento se agregó correctamente con UID: 123", tu res
 Si el sistema te dice: "No se encontraron eventos", tu respuesta debe ser:
 {"respuesta": "No encontré ningún evento para esa fecha. ¿Quieres probar con otra?"}
 
+Los eventos tienen "priority" (0-9). Si el usuario pregunta por el más importante, usa buscar_eventos y luego filtra por mayor priority.
 Siempre usa un tono cálido y ofrécele ayuda adicional al final.
 """
 
@@ -543,7 +388,8 @@ El usuario pidió: "{prompt_usuario}"
 El sistema ejecutó la acción: "{accion if accion else 'desconocida'}"
 El resultado obtenido fue: "{resultado}"
 
-Ahora, como asistente conversacional, redacta una respuesta amigable para el usuario. 
+Ahora, como asistente conversacional cubano, redacta una respuesta amigable para el usuario. 
+Si {resultado} es una lista, ponla sin los UID y muestra los datos más importantes.
 Si fue exitoso, confirma con entusiasmo. Si hubo error, explícalo con empatía y sugiere alternativas.
 Si no hay eventos, dilo de manera amable.
 Termina siempre ofreciendo ayuda adicional (ej: "¿Necesitas algo más?").
@@ -557,13 +403,13 @@ Responde SOLO con un JSON que contenga la clave "respuesta".
         temperature=0.0,
         system_prompt_override=SYSTEM_PROMPT_FORMATEO
     )
-    logger.info(f"Respuesta del LLM para formateo: {respuesta_llm}")
+    logger.info(f"\nRespuesta del LLM para formateo: {respuesta_llm}")
     if respuesta_llm:
         datos_respuesta = extraer_cualquier_json(respuesta_llm)
         logger.info(f"Datos extraídos: {datos_respuesta}")
         if datos_respuesta and "respuesta" in datos_respuesta:
             return datos_respuesta["respuesta"]
-    logger.warning("No se pudo obtener una respuesta formateada del LLM. Usando fallback.")
+    logger.warning("\nNo se pudo obtener una respuesta formateada del LLM. Usando fallback.")
     return resultado  # fallback
 
 # ============================================================================
@@ -610,41 +456,46 @@ def main():
             break
 
         # Si está en modo selección (el usuario eligió un número)
-        if modo_seleccion and prompt.isdigit():
-            indice = int(prompt)
-            if 1 <= indice <= len(ultima_lista):
-                uid = ultima_lista[indice-1]['uid']
-                # Construir el JSON según la acción guardada
-                if ultima_accion == "delete":
-                    data = {"accion": "delete", "parametros": {"uid": uid}}
-                elif ultima_accion == "modify":
-                    data = {"accion": "modify", "parametros": {"uid": uid, **ultimos_cambios}}
-                else:
-                    print("Lo siento, no puedo procesar esa acción.")
+        if modo_seleccion:
+            # Intentar extraer un número de la respuesta
+            import re
+            match = re.search(r'(\d+)', prompt)
+            if match:
+                indice = int(match.group(1))
+                if 1 <= indice <= len(ultima_lista):
+                    uid = ultima_lista[indice-1]['uid']
+                    if ultima_accion == "delete":
+                        data = {"accion": "delete", "parametros": {"uid": uid}}
+                    elif ultima_accion == "modify":
+                        data = {"accion": "modify", "parametros": {"uid": uid, **ultimos_cambios}}
+                    else:
+                        print("Lo siento, no puedo procesar esa acción.")
+                        modo_seleccion = False
+                        ultima_lista = []
+                        ultima_accion = None
+                        ultimos_cambios = None
+                        continue
+
+                    resultado = ejecutar_accion(data)
+                    respuesta_formateada = formatear_respuesta(resultado, prompt, ultima_accion)
+                    print(respuesta_formateada)
                     modo_seleccion = False
                     ultima_lista = []
                     ultima_accion = None
                     ultimos_cambios = None
                     continue
-
-                resultado = ejecutar_accion(data)
-                respuesta_formateada = formatear_respuesta(resultado, prompt, ultima_accion)
-                print(respuesta_formateada)
-                # Resetear modo selección
-                modo_seleccion = False
-                ultima_lista = []
-                ultima_accion = None
-                ultimos_cambios = None
-                continue
+                else:
+                    print(f"Número inválido. Elige entre 1 y {len(ultima_lista)}.")
+                    continue
             else:
-                print(f"Número inválido. Elige entre 1 y {len(ultima_lista)}.")
+                print("Por favor, responde con el número del evento que quieres procesar.")
                 continue
 
-        logger.info(f"Usuario: {prompt}")   
+        logger.info(f"\nUsuario: {prompt}")   
         print("\n[*] Enviando petición al LLM...\n")
         respuesta = consultar_llm(prompt)
         if not respuesta:
-            logger.error("[!] Error en la comunicación con el LLM.")
+            logger.error("\n[!] Error en la comunicación con el LLM.")
             print("[!] Error en la comunicación con el LLM.\n")
             continue
 
@@ -653,20 +504,12 @@ def main():
         if not data:
             logger.error("[\n!] El LLM no devolvió un JSON válido.")
             print("[\n!] El LLM no devolvió un JSON válido.")
-            logger.debug(f"[DEBUG] Respuesta del LLM: {respuesta}")
+            logger.debug(f"\n[DEBUG] Respuesta del LLM: {respuesta}")
             continue
 
         # Mostrar el JSON interpretado
         logger.info("\n[*] JSON recibido:")
         logger.info(json.dumps(data, indent=2))
-
-        # Construir y mostrar el comando equivalente de calendario_ics
-        comando_texto = construir_comando_texto(data)
-        if comando_texto:
-            logger.info(f"\n[*] Comando equivalente: {comando_texto}\n")
-        else:
-            # print("\n[*] No se pudo construir un comando textual para esta acción.")
-            logger.warning("\n[*] No se pudo construir un comando textual para esta acción.")
 
         # Ejecutar la acción y mostrar el resultado
         resultado = ejecutar_accion(data)

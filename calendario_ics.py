@@ -354,12 +354,16 @@ def listar_calendarios():
         lines.append(f"  {obtener_nombre_calendario(ruta)} -> {ruta}")
     return "\n".join(lines)
 
-def listar_eventos(calendario=None, start=None, end=None):
+def listar_eventos(calendario=None, start=None, end=None, **kwargs):
     """
     Lista los eventos del calendario especificado (o todos si no se indica).
     Permite filtrar por rango de fechas (start y end).
     Retorna una cadena con la lista formateada.
     """
+
+    start = kwargs.get('start')
+    end = kwargs.get('end')
+
     archivos = [encontrar_calendario(calendario)] if calendario else obtener_archivos_calendario()
     if not archivos:
         msg = "No se encontraron calendarios."
@@ -391,16 +395,20 @@ def listar_eventos(calendario=None, start=None, end=None):
             for ev in eventos:
                 dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
                 dtend = ev['dtend'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtend'), datetime) else "Sin fecha"
-                output.append(f"  UID: {ev['uid']} | {ev['summary']} | {dtstart} -> {dtend}")
+                output.append(f"  UID: {ev['uid']} | {ev['summary']} | {dtstart} -> {dtend} | Prioridad: {ev.get('priority', 0)}")
     return "\n".join(output)
 
-def agregar_evento(calendario=None, evento=None):
+def agregar_evento(calendario=None, evento=None, **kwargs):
     """
     Agrega un nuevo evento al calendario especificado.
     Retorna (uid, mensaje) o (None, mensaje de error).
     """
     if evento is None:
         evento = {}
+        # Mapear parámetros comunes a evento
+        for key in ['summary', 'description', 'dtstart', 'dtend', 'location', 'priority']:
+            if key in kwargs:
+                evento[key] = kwargs[key]
     ruta = encontrar_calendario(calendario)
     if not ruta:
         msg = "Calendario no encontrado."
@@ -425,7 +433,7 @@ def agregar_evento(calendario=None, evento=None):
     logger.error(msg)
     return None, msg
 
-def mostrar_evento(uid, calendario=None):
+def mostrar_evento(uid, calendario=None, **kwargs):
     """
     Busca un evento por su UID y muestra todos sus campos.
     Retorna una cadena con los detalles o un mensaje de no encontrado.
@@ -498,7 +506,7 @@ def modificar_evento(uid, calendario=None, **kwargs):
     logger.warning(msg)
     return False, msg
 
-def eliminar_evento(uid, calendario=None):
+def eliminar_evento(uid, calendario=None, **kwargs):
     """
     Elimina un evento por su UID.
     Retorna (True/False, mensaje).
@@ -541,17 +549,40 @@ def eliminar_evento(uid, calendario=None):
     return False, msg
 
 # ============================================================================
-# BÚSQUEDA Y OPERACIONES POR FILTROS (NUEVO EN v2.2.0)
+# BÚSQUEDA Y OPERACIONES POR FILTROS
 # ============================================================================
 
-def buscar_eventos(calendario=None, fecha=None, hora=None, texto=None, ubicacion=None):
+def buscar_eventos(calendario=None, **kwargs):
     """
     Busca eventos que coincidan con los filtros proporcionados.
+    Si se da 'fecha', se usa como día exacto (ignora start/end).
+    Si se da 'start' y 'end', filtra por rango de fechas (inclusive).
     Retorna una lista de eventos (diccionarios completos).
     """
+    # Extraer filtros de kwargs
+    fecha = kwargs.get('fecha')
+    hora = kwargs.get('hora')
+    texto = kwargs.get('texto')
+    ubicacion = kwargs.get('ubicacion')
+    start = kwargs.get('start')
+    end = kwargs.get('end')
+
+    # Depuración: mostrar filtros aplicados
+    logger.debug(f"[DEBUG] Filtros: fecha={fecha}, hora={hora}, texto={texto}, ubicacion={ubicacion}, start={start}, end={end}")
+
     archivos = [encontrar_calendario(calendario)] if calendario else obtener_archivos_calendario()
     coincidencias = []
-    
+
+    # Parsear start/end si son strings
+    if start and isinstance(start, str):
+        start = parsear_fecha_hora(start)
+        if start:
+            start = start.replace(hour=0, minute=0, second=0)
+    if end and isinstance(end, str):
+        end = parsear_fecha_hora(end)
+        if end:
+            end = end.replace(hour=23, minute=59, second=59)
+
     for ruta in archivos:
         if not ruta or not os.path.exists(ruta):
             continue
@@ -559,40 +590,66 @@ def buscar_eventos(calendario=None, fecha=None, hora=None, texto=None, ubicacion
         if contenido is None:
             continue
         for ev in parsear_eventos(contenido):
-            # Aplicar filtros
+            dtstart_evento = ev.get('dtstart')
+            # --- Aplicar TODOS los filtros de forma secuencial ---
+            # 1. Filtro de fecha exacta
             if fecha:
-                dtstart = ev.get('dtstart')
-                if isinstance(dtstart, datetime):
-                    try:
-                        fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
-                        if dtstart.date() != fecha_obj:
-                            continue
-                    except ValueError:
-                        # Si el formato no es YYYY-MM-DD, intentar con fecha relativa
-                        pass
-            if hora:
-                dtstart = ev.get('dtstart')
-                if isinstance(dtstart, datetime):
-                    if dtstart.strftime("%H:%M") != hora:
+                if not isinstance(dtstart_evento, datetime):
+                    continue
+                try:
+                    fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
+                    if dtstart_evento.date() != fecha_obj:
                         continue
+                except ValueError:
+                    continue
+            else:
+                # 2. Rango de fechas (si no hay fecha exacta)
+                if start and dtstart_evento and dtstart_evento < start:
+                    continue
+                if end and dtstart_evento and dtstart_evento > end:
+                    continue
+
+            # 3. Filtro de hora
+            if hora:
+                if not isinstance(dtstart_evento, datetime):
+                    continue
+                if dtstart_evento.strftime("%H:%M") != hora:
+                    continue
+
+            # 4. Filtro de texto (case-insensitive)
             if texto:
                 texto_lower = texto.lower()
                 if not (texto_lower in ev.get('summary', '').lower() or 
                         texto_lower in ev.get('description', '').lower()):
                     continue
+
+            # 5. Filtro de ubicación (case-insensitive)
             if ubicacion:
                 if ubicacion.lower() not in ev.get('location', '').lower():
                     continue
+
+            # Si pasó todos los filtros, se añade
             coincidencias.append(ev)
+
     return coincidencias
 
-def eliminar_por_filtro(calendario=None, filtros=None):
+def contar_eventos(**kwargs):
+    """Devuelve el número de eventos que coinciden con los filtros."""
+    eventos = buscar_eventos(**kwargs)
+    return len(eventos)
+
+def eliminar_por_filtro(calendario=None, filtros=None, **kwargs):
     """
     Busca eventos con los filtros y, si hay exactamente uno, lo elimina.
     Retorna (True/False, mensaje, lista_de_coincidencias) si hay más de uno.
     """
+    # Si no se pasa filtros, se construye desde kwargs
     if filtros is None:
         filtros = {}
+        # Extraer parámetros de filtro comunes
+        for key in ['fecha', 'hora', 'texto', 'ubicacion', 'start', 'end']:
+            if key in kwargs:
+                filtros[key] = kwargs[key]
     coincidencias = buscar_eventos(calendario, **filtros)
     if len(coincidencias) == 0:
         return False, "No se encontraron eventos con esos criterios.", []
@@ -603,15 +660,21 @@ def eliminar_por_filtro(calendario=None, filtros=None):
     else:
         return False, "Varios eventos coinciden. Elige uno:", coincidencias
 
-def modificar_por_filtro(calendario=None, filtros=None, cambios=None):
+def modificar_por_filtro(calendario=None, filtros=None, cambios=None, **kwargs):
     """
     Busca eventos con los filtros y, si hay exactamente uno, lo modifica.
     Retorna (True/False, mensaje, lista_de_coincidencias) si hay más de uno.
     """
     if filtros is None:
         filtros = {}
+        for key in ['fecha', 'hora', 'texto', 'ubicacion', 'start', 'end']:
+            if key in kwargs:
+                filtros[key] = kwargs[key]
     if cambios is None:
         cambios = {}
+        for key in ['summary', 'description', 'dtstart', 'dtend', 'location', 'priority']:
+            if key in kwargs:
+                cambios[key] = kwargs[key]
     coincidencias = buscar_eventos(calendario, **filtros)
     if len(coincidencias) == 0:
         return False, "No se encontraron eventos con esos criterios.", []
@@ -671,14 +734,18 @@ def main():
 
     search_parser = subparsers.add_parser("search", help="Buscar eventos por filtros")
     search_parser.add_argument("--calendar", help="Nombre del calendario")
-    search_parser.add_argument("--date", help="Fecha (YYYY-MM-DD)")
+    search_parser.add_argument("--date", help="Fecha exacta (YYYY-MM-DD)")
+    search_parser.add_argument("--start", help="Fecha inicio (YYYY-MM-DD)")
+    search_parser.add_argument("--end", help="Fecha fin (YYYY-MM-DD)")
     search_parser.add_argument("--text", help="Texto en título o descripción")
     search_parser.add_argument("--location", help="Ubicación")
     search_parser.add_argument("--time", help="Hora (HH:MM)")
 
     delete_filter_parser = subparsers.add_parser("delete-filter", help="Eliminar eventos por filtros")
     delete_filter_parser.add_argument("--calendar", help="Nombre del calendario")
-    delete_filter_parser.add_argument("--date", help="Fecha (YYYY-MM-DD)")
+    delete_filter_parser.add_argument("--date", help="Fecha exacta (YYYY-MM-DD)")
+    delete_filter_parser.add_argument("--start", help="Fecha inicio (YYYY-MM-DD)")
+    delete_filter_parser.add_argument("--end", help="Fecha fin (YYYY-MM-DD)")
     delete_filter_parser.add_argument("--text", help="Texto en título o descripción")
     delete_filter_parser.add_argument("--location", help="Ubicación")
     delete_filter_parser.add_argument("--time", help="Hora (HH:MM)")
@@ -686,7 +753,9 @@ def main():
 
     modify_filter_parser = subparsers.add_parser("modify-filter", help="Modificar eventos por filtros")
     modify_filter_parser.add_argument("--calendar", help="Nombre del calendario")
-    modify_filter_parser.add_argument("--date", help="Fecha (YYYY-MM-DD)")
+    modify_filter_parser.add_argument("--date", help="Fecha exacta (YYYY-MM-DD)")
+    modify_filter_parser.add_argument("--start", help="Fecha inicio (YYYY-MM-DD)")
+    modify_filter_parser.add_argument("--end", help="Fecha fin (YYYY-MM-DD)")
     modify_filter_parser.add_argument("--text", help="Texto en título o descripción")
     modify_filter_parser.add_argument("--location", help="Ubicación")
     modify_filter_parser.add_argument("--time", help="Hora (HH:MM)")
@@ -745,6 +814,10 @@ def main():
         filtros = {}
         if args.date:
             filtros["fecha"] = args.date
+        if args.start:
+            filtros["start"] = args.start
+        if args.end:
+            filtros["end"] = args.end
         if args.text:
             filtros["texto"] = args.text
         if args.location:
@@ -765,6 +838,10 @@ def main():
         filtros = {}
         if args.date:
             filtros["fecha"] = args.date
+        if args.start:
+            filtros["start"] = args.start
+        if args.end:
+            filtros["end"] = args.end
         if args.text:
             filtros["texto"] = args.text
         if args.location:
@@ -791,6 +868,10 @@ def main():
         filtros = {}
         if args.date:
             filtros["fecha"] = args.date
+        if args.start:
+            filtros["start"] = args.start
+        if args.end:
+            filtros["end"] = args.end
         if args.text:
             filtros["texto"] = args.text
         if args.location:

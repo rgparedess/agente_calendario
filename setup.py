@@ -30,6 +30,7 @@ setup(
     install_requires=[
         "requests>=2.25.0",
         "calendario_ics>=2.3.1",   # dependencia
+        "openai>=2.21.0",
     ],
     entry_points={
         "console_scripts": [

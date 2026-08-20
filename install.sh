@@ -1,46 +1,71 @@
 #!/bin/bash
-# Script de instalación manual para calendario_ics y agente_calendario
-# Copia los archivos .py a ~/.local/bin y crea wrappers ejecutables.
+# Instalador para calendario-agent (ejecutable empaquetado con PyInstaller)
 
 set -e
 
-# Directorio de instalación (para usuario, sin sudo)
 INSTALL_DIR="$HOME/.local/bin"
-
-# Crear el directorio si no existe
+DESKTOP_DIR="$HOME/.local/share/applications"
+ICON_DIR="$HOME/.local/share/icons"
 mkdir -p "$INSTALL_DIR"
 
-# Función para instalar un script
-install_script() {
-    local src="$1"
-    local name="$2"
-    local dest="$INSTALL_DIR/$name"
-    
-    echo "Instalando $name en $dest..."
-    cp "$src" "$dest"
-    chmod +x "$dest"
-}
-
-# Instalar calendario_ics (backend) - SIEMPRE primero
-if [ -f "calendario_ics.py" ]; then
-    install_script "calendario_ics.py" "calendario_ics.py"
+if [ -f "./calendario-agent" ]; then
+    cp "./calendario-agent" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/calendario-agent"
+    echo "[INFO] Ejecutable instalado en $INSTALL_DIR/calendario-agent"
 else
-    echo "Advertencia: calendario_ics.py no encontrado en el directorio actual."
+    echo "[ERROR] No se encuentra 'calendario-agent'."
+    exit 1
 fi
 
-# Instalar agente_calendario
-if [ -f "agente_calendario.py" ]; then
-    install_script "agente_calendario.py" "calendario-agent"
-else
-    echo "Advertencia: agente_calendario.py no encontrado en el directorio actual."
+# Copiar icono a la carpeta estándar
+mkdir -p "$HOME/.local/share/icons"
+if [ -f "./logo/logo.png" ]; then
+    cp "./logo/logo.png" "$HOME/.local/share/icons/agente_calendario.png"
 fi
 
-# Verificar que ~/.local/bin está en el PATH
+if [ -f "$ICON_DIR/agente_calendario.png" ]; then
+    ICON_NAME="agente_calendario"
+else
+    ICON_NAME="calendar"
+fi
+
+# Crear archivo .desktop (usar la ruta absoluta del ejecutable)
+cat > "$DESKTOP_DIR/agente_calendario.desktop" <<EOF
+[Desktop Entry]
+Name=Agente Calendario
+Comment=Agente de IA conversacional para gestionar calendario con LLM
+Exec=$INSTALL_DIR/calendario-agent --host 127.0.0.1 --port 8082
+Icon=$ICON_NAME
+Terminal=true
+Type=Application
+Categories=Utility;Office;
+EOF
+
+chmod +x "$DESKTOP_DIR/agente_calendario.desktop"
+echo "[INFO] Lanzador .desktop creado en $DESKTOP_DIR/agente_calendario.desktop"
+
+# Agregar al PATH si no está
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    echo "⚠️  ~/.local/bin no está en tu PATH."
-    echo "   Agrégalo con: export PATH=\"\$HOME/.local/bin:\$PATH\""
-    echo "   O añade la línea a tu ~/.bashrc"
+    echo "[!]  $HOME/.local/bin no está en tu PATH."
+    echo "[?] ¿Deseas agregarlo permanentemente? (s/N)"
+    read -r respuesta
+    if [[ "$respuesta" == "s" || "$respuesta" == "S" ]]; then
+        if [ -f "$HOME/.bashrc" ]; then
+            SHELL_RC="$HOME/.bashrc"
+        elif [ -f "$HOME/.zshrc" ]; then
+            SHELL_RC="$HOME/.zshrc"
+        else
+            SHELL_RC="$HOME/.profile"
+        fi
+        echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$SHELL_RC"
+        echo "[INFO] PATH actualizado en $SHELL_RC. Reinicia la terminal o ejecuta 'source $SHELL_RC'."
+    else
+        echo "[*]  Agrégalo manualmente con: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+else
+    echo "[INFO] $HOME/.local/bin ya está en el PATH."
 fi
 
-echo "✅ Instalación manual completada."
-echo "Ahora puedes ejecutar 'calendario-agent'."
+echo ""
+echo "[INFO] Instalación completada."
+echo "   Ahora puedes ejecutar: calendario-agent --host 127.0.0.1 --port 8082"

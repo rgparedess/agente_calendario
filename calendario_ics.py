@@ -409,6 +409,13 @@ def agregar_evento(calendario=None, evento=None, **kwargs):
         for key in ['summary', 'description', 'dtstart', 'dtend', 'location', 'priority']:
             if key in kwargs:
                 evento[key] = kwargs[key]
+
+    # --- CONVERTIR FECHAS DE STRING A DATETIME ---
+    if 'dtstart' in evento and isinstance(evento['dtstart'], str):
+        evento['dtstart'] = parsear_fecha_hora(evento['dtstart'])
+    if 'dtend' in evento and isinstance(evento['dtend'], str):
+        evento['dtend'] = parsear_fecha_hora(evento['dtend'])
+
     ruta = encontrar_calendario(calendario)
     if not ruta:
         msg = "Calendario no encontrado."
@@ -647,7 +654,7 @@ def eliminar_por_filtro(calendario=None, filtros=None, **kwargs):
     if filtros is None:
         filtros = {}
         # Extraer parámetros de filtro comunes
-        for key in ['fecha', 'hora', 'texto', 'ubicacion', 'start', 'end']:
+        for key in ['fecha', 'hora', 'texto', 'ubicacion', 'start', 'end', 'priority']:
             if key in kwargs:
                 filtros[key] = kwargs[key]
     coincidencias = buscar_eventos(calendario, **filtros)
@@ -749,6 +756,7 @@ def main():
     delete_filter_parser.add_argument("--text", help="Texto en título o descripción")
     delete_filter_parser.add_argument("--location", help="Ubicación")
     delete_filter_parser.add_argument("--time", help="Hora (HH:MM)")
+    delete_filter_parser.add_argument("--priority", type=int, help="Prioridad")
     delete_filter_parser.add_argument("--force", action="store_true", help="Eliminar sin confirmar si hay múltiples")
 
     modify_filter_parser = subparsers.add_parser("modify-filter", help="Modificar eventos por filtros")
@@ -848,6 +856,8 @@ def main():
             filtros["ubicacion"] = args.location
         if args.time:
             filtros["hora"] = args.time
+        if args.priority:
+                filtros["priority"] = args.priority
         ok, msg, coincidencias = eliminar_por_filtro(args.calendar, filtros)
         if not ok and coincidencias:
             print(msg)

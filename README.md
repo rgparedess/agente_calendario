@@ -1,16 +1,13 @@
 # agente_calendario
 
-Agente conversacional para gestionar eventos del calendario.
-Conversational agent to manage calendar events.
+Agente IA conversacional para gestionar eventos del calendario.
+Conversational AI agent to manage calendar events.
 
 Utiliza un modelo de lenguaje (LLM) para interpretar instrucciones en lenguaje natural,
 It uses a language model (LLM) to interpret natural language instructions,
 
-genera un JSON con la acción y los parámetros, y ejecuta la operación correspondiente
-generates a JSON with the action and parameters, and executes the corresponding operation
-
-sobre el archivo ICS del calendario a través del módulo calendario_ics (su backend).
-on the calendar ICS file through the calendario_ics module (its backend).
+y ejecuta las operaciones correspondientes sobre el archivo ICS del calendario a través del módulo `calendario_ics`.
+and executes the corresponding operations on the calendar ICS file through the `calendario_ics` module.
 
 
 ## Plataformas Soportadas (Probado con:) / Supported Platforms (Tested with:)
@@ -34,13 +31,15 @@ pip install agente_calendario
 ### Con script / With script
 ```bash
 # Para Linux / For Linux
-# Copiar el script al directorio donde están los .py
+# Copiar el script al directorio donde está el binario
+# Abrir la terminal
 chmod +x install.sh
 ./install.sh
 ```
 
 ```bash
 # Para Windows / For Windows
+# Copiar el script al directorio donde está el binario
 # Abrir PowerShell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\install.ps1
@@ -85,7 +84,9 @@ If not set, the agent will try to auto-detect the path based on your OS:
 
 calendario_ics (se instala automáticamente / installed automatically)
 
-Servidor llama.cpp en ejecución / llama.cpp server running
+openai (se instala automáticamente / installed automatically)
+
+Servidor llama.cpp en ejecución (con un modelo compatible) / llama.cpp server running (with a compatible model)
 
 ## Uso / Usage
 
@@ -101,6 +102,31 @@ calendario-agent
 # Especificando host y puerto / Specifying host and port
 calendario-agent --host 192.168.1.10 --port 8080
 ```
+
+# Herramientas disponibles / Available tools
+
+El agente puede utilizar las siguientes herramientas para gestionar tu calendario:
+The agent can use the following tools to manage your calendar:
+
+    listar_eventos: Lista eventos con filtros de fecha.
+
+    buscar_eventos: Busca eventos por fecha, texto, ubicación, hora o rango.
+
+    contar_eventos: Cuenta eventos según filtros.
+
+    agregar_evento: Agrega un nuevo evento.
+
+    mostrar_evento: Muestra detalles de un evento por su UID.
+
+    modificar_evento: Modifica un evento por UID.
+
+    eliminar_evento: Elimina un evento por UID.
+
+    eliminar_por_filtro: Elimina eventos que coinciden con filtros (pregunta si hay varios).
+
+    modificar_por_filtro: Modifica eventos que coinciden con filtros (pregunta si hay varios).
+
+    listar_calendarios: Lista los calendarios disponibles.
 
 ## Ejemplo de sesión interactiva / Interactive session example
 

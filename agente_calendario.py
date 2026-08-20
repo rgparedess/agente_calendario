@@ -7,26 +7,31 @@
 
 """
 Agente conversacional para gestionar eventos del calendario.
-Utiliza un modelo de lenguaje (LLM) para interpretar instrucciones en lenguaje natural,
-genera un JSON con la acción y los parámetros, y ejecuta la operación correspondiente
-sobre el archivo ICS del calendario a través del módulo calendario_ics (su backend).
+Utiliza la librería oficial de OpenAI (openai) para comunicarse con el servidor llama.cpp.
+El servidor debe emular el endpoint /v1/chat/completions.
+
+El agente usa la funcionalidad de tools (tool_calls) para que el LLM decida
+qué función ejecutar y con qué parámetros, en lugar de generar un JSON manualmente.
+Esto hace el código más limpio, robusto y fácil de mantener.
 """
 
 import os
 import sys
 import json
 import argparse
-import re
-# import requests
-import urllib.request
-import urllib.error
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import calendar
 
-# Importación de las funciones del módulo de calendario_ics
+from openai import OpenAI  # Librería oficial de OpenAI
+
+# Importación de las funciones del módulo calendario_ics
 import calendario_ics as cal
+
+# Variables para detectar repeticiones
+_recent_calls = []   # lista de (nombre, args_json) de las últimas llamadas
+MAX_STEPS = 10         # número máximo de iteraciones del agente
 
 # ============================================================================
 # CONFIGURACIÓN DE LOGGING
@@ -40,7 +45,6 @@ def get_log_path():
         appdata = os.environ.get("APPDATA", os.path.expanduser("~\\AppData\\Roaming"))
         log_dir = Path(appdata) / "calendario_agent" / "logs"
     else:
-        # macOS u otros
         log_dir = Path.home() / ".local" / "share" / "calendario_agent" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "calendario_agent.log"
@@ -50,8 +54,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler(get_log_path()),  # Archivo de log
-        logging.StreamHandler()               # Consola (sigue viendo mensajes)
+        logging.FileHandler(get_log_path()),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -61,7 +65,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Agente calendario con LLM")
+    parser = argparse.ArgumentParser(description="Agente calendario con LLM (usando tool_calls)")
     parser.add_argument(
         "--host",
         help="Dirección del servidor LLM (ej: 127.0.0.1)",
@@ -79,338 +83,327 @@ HOST = args.host
 PORT = args.port
 BASE_URL = f"http://{HOST}:{PORT}/v1"
 
-# Tiempo de espera para las peticiones HTTP (None = sin límite)
-TIMEOUT_HTTP = None
+# Crear el cliente OpenAI apuntando al servidor local
+# La API key no es necesaria para llama.cpp, pero la librería la exige
+client = OpenAI(
+    base_url=BASE_URL,
+    api_key="ignored"  # cualquier valor sirve
+)
 
 # Número máximo de mensajes en el historial de conversación (para no saturar el contexto)
-MAX_HISTORIAL = 4
+MAX_HISTORIAL = 10
 
 # ============================================================================
-# HISTORIAL DE CONVERSACIÓN (estado de la sesión)
+# DEFINICIÓN DE LAS HERRAMIENTAS (TOOLS) PARA EL LLM
 # ============================================================================
 
-# Lista que almacena los mensajes del sistema y del usuario para mantener el contexto
-historial = []
+# Aquí se definen las herramientas que el LLM podrá usar.
+# Cada herramienta tiene un nombre, descripción y un esquema JSON con los parámetros.
+# El LLM decide qué herramienta llamar y con qué argumentos.
 
-def inicializar_historial():
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "listar_eventos",
+            "description": "Lista los eventos del calendario. Permite filtrar por calendario y rango de fechas.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."},
+                    "start": {"type": "string", "description": "Fecha de inicio (YYYY-MM-DD)."},
+                    "end": {"type": "string", "description": "Fecha de fin (YYYY-MM-DD)."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_eventos",
+            "description": "Busca eventos que coincidan con filtros (fecha, texto, ubicación, hora, rango).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."},
+                    "fecha": {"type": "string", "description": "Fecha exacta (YYYY-MM-DD)."},
+                    "start": {"type": "string", "description": "Fecha de inicio del rango (YYYY-MM-DD)."},
+                    "end": {"type": "string", "description": "Fecha de fin del rango (YYYY-MM-DD)."},
+                    "texto": {"type": "string", "description": "Texto a buscar en título o descripción."},
+                    "ubicacion": {"type": "string", "description": "Ubicación del evento."},
+                    "hora": {"type": "string", "description": "Hora exacta (HH:MM)."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "contar_eventos",
+            "description": "Cuenta el número de eventos que coinciden con los filtros.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."},
+                    "fecha": {"type": "string", "description": "Fecha exacta (YYYY-MM-DD)."},
+                    "start": {"type": "string", "description": "Fecha de inicio del rango (YYYY-MM-DD)."},
+                    "end": {"type": "string", "description": "Fecha de fin del rango (YYYY-MM-DD)."},
+                    "texto": {"type": "string", "description": "Texto a buscar en título o descripción."},
+                    "ubicacion": {"type": "string", "description": "Ubicación del evento."},
+                    "hora": {"type": "string", "description": "Hora exacta (HH:MM)."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agregar_evento",
+            "description": "Agrega un nuevo evento al calendario.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."},
+                    "summary": {"type": "string", "description": "Título del evento (obligatorio)."},
+                    "description": {"type": "string", "description": "Descripción (opcional)."},
+                    "dtstart": {"type": "string", "description": "Inicio (YYYY-MM-DD HH:MM) (obligatorio)."},
+                    "dtend": {"type": "string", "description": "Fin (YYYY-MM-DD HH:MM) (opcional)."},
+                    "location": {"type": "string", "description": "Ubicación (opcional)."},
+                    "priority": {"type": "integer", "description": "Prioridad (0-9) (obligatorio)."}
+                },
+                "required": ["summary", "dtstart"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mostrar_evento",
+            "description": "Muestra los detalles de un evento usando su UID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "uid": {"type": "string", "description": "UID del evento (obligatorio)."},
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."}
+                },
+                "required": ["uid"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "modificar_evento",
+            "description": "Modifica un evento existente usando su UID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "uid": {"type": "string", "description": "UID del evento (obligatorio)."},
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."},
+                    "summary": {"type": "string", "description": "Nuevo título."},
+                    "description": {"type": "string", "description": "Nueva descripción."},
+                    "dtstart": {"type": "string", "description": "Nuevo inicio."},
+                    "dtend": {"type": "string", "description": "Nuevo fin."},
+                    "location": {"type": "string", "description": "Nueva ubicación."},
+                    "priority": {"type": "integer", "description": "Nueva prioridad."}
+                },
+                "required": ["uid"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_evento",
+            "description": "Elimina un evento usando su UID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "uid": {"type": "string", "description": "UID del evento (obligatorio)."},
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."}
+                },
+                "required": ["uid"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "eliminar_por_filtro",
+            "description": "Elimina eventos que coinciden con filtros. Si hay varios, devuelve una lista para que el usuario elija.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."},
+                    "fecha": {"type": "string", "description": "Fecha exacta (YYYY-MM-DD)."},
+                    "start": {"type": "string", "description": "Fecha de inicio del rango (YYYY-MM-DD)."},
+                    "end": {"type": "string", "description": "Fecha de fin del rango (YYYY-MM-DD)."},
+                    "texto": {"type": "string", "description": "Texto en título o descripción."},
+                    "ubicacion": {"type": "string", "description": "Ubicación."},
+                    "hora": {"type": "string", "description": "Hora exacta (HH:MM)."},
+                    "priority": {"type": "integer", "description": "Prioridad (0-9)."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "modificar_por_filtro",
+            "description": "Modifica eventos que coinciden con filtros. Si hay varios, devuelve una lista para que el usuario elija.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calendar": {"type": "string", "description": "Nombre del calendario (opcional)."},
+                    "fecha": {"type": "string", "description": "Fecha exacta (YYYY-MM-DD)."},
+                    "start": {"type": "string", "description": "Fecha de inicio del rango (YYYY-MM-DD)."},
+                    "end": {"type": "string", "description": "Fecha de fin del rango (YYYY-MM-DD)."},
+                    "texto": {"type": "string", "description": "Texto en título o descripción."},
+                    "ubicacion": {"type": "string", "description": "Ubicación."},
+                    "hora": {"type": "string", "description": "Hora exacta (HH:MM)."},
+                    "summary": {"type": "string", "description": "Nuevo título."},
+                    "description": {"type": "string", "description": "Nueva descripción."},
+                    "dtstart": {"type": "string", "description": "Nuevo inicio."},
+                    "dtend": {"type": "string", "description": "Nuevo fin."},
+                    "location": {"type": "string", "description": "Nueva ubicación."},
+                    "priority": {"type": "integer", "description": "Nueva prioridad."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "listar_calendarios",
+            "description": "Lista los calendarios disponibles.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    }
+]
+
+# Mapeo de nombres de herramientas a funciones reales de calendario_ics
+TOOL_FUNCTIONS = {
+    "listar_eventos": cal.listar_eventos,
+    "buscar_eventos": cal.buscar_eventos,
+    "contar_eventos": cal.contar_eventos,
+    "agregar_evento": cal.agregar_evento,
+    "mostrar_evento": cal.mostrar_evento,
+    "modificar_evento": cal.modificar_evento,
+    "eliminar_evento": cal.eliminar_evento,
+    "eliminar_por_filtro": cal.eliminar_por_filtro,
+    "modificar_por_filtro": cal.modificar_por_filtro,
+    "listar_calendarios": cal.listar_calendarios,
+}
+
+# ============================================================================
+# FUNCIÓN CONSULTAR LLM (CON TOOL_CALLS)
+# ============================================================================
+
+def consultar_llm(prompt_usuario):
     """
-    Construye el mensaje inicial del sistema con la fecha actual y ejemplos
-    de formato de respuesta (JSON). Este mensaje se mantiene al inicio del historial.
+    Envía el prompt del usuario al LLM y maneja las tool_calls.
+    Retorna la respuesta final del asistente o un diccionario con coincidencias.
     """
 
-    hoy = datetime.now().strftime("%Y-%m-%d")
-    dia = calendar.day_name[datetime.now().weekday()]
-
-    system_prompt = f"""
-    Hoy es {dia} {hoy}
-
-    Eres un asistente que gestiona un calendario. Tienes estas funciones disponibles:
-
-    - **listar_eventos(calendar=None, start=None, end=None)**: Lista eventos en un rango de fechas.
-    - **buscar_eventos(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None)**: Busca eventos con filtros.
-    - **contar_eventos(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None)**: Cuenta eventos que coinciden con filtros.
-    - **agregar_evento(summary, dtstart, dtend=None, location=None, priority=0, calendar=None)**: Agrega un nuevo evento.
-    - **eliminar_por_filtro(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None, calendar=None)**: Elimina eventos que coinciden con filtros.
-    - **modificar_por_filtro(fecha=None, start=None, end=None, texto=None, ubicacion=None, hora=None, calendar=None, summary=None, description=None, dtstart=None, dtend=None, location=None, priority=None)**: Modifica eventos que coinciden con los filtros.
-    - **eliminar_evento(uid, calendar=None)**: Elimina un evento por su UID.
-    - **mostrar_evento(uid, calendar=None)**: Muestra detalles de un evento por UID.
-    - **modificar_evento(uid, calendar=None, **kwargs)**: Modifica un evento por UID.
-
-    Responde SOLO con un JSON que contenga "accion" (nombre de la función) y "parametros" (diccionario con los argumentos).
-
-    REGLAS:
-    - Usa exactamente los nombres de funciones y parámetros descritos. Si no estás seguro, elige la función más parecida, pero no inventes ninguna.
-    - Prefiere usar filtros (fecha, texto, ubicación, hora) en lugar de UID cuando sea posible.
-    - mostrar_evento y modificar_evento SOLO aceptan uid. No aceptan fecha, texto, ni ningún otro filtro.
-    - Si el usuario pide detalles de un evento por fecha, texto o ubicación, usa buscar_eventos primero. Luego, si encuentras un solo evento, puedes mostrar sus detalles con mostrar_evento(uid=...).
-    - Si hay múltiples coincidencias al eliminar/modificar, el agente te pedirá que elijas y el usuario pondrá el número de su opción.
-    - Los eventos tienen "priority" (0-9). Si el usuario pregunta por el más importante, usa buscar_eventos y luego filtra por mayor priority.
-    """
+    global _recent_calls
     
-    global historial
-    historial = [{"role": "system", "content": system_prompt}]
+    # Construir el historial de mensajes
+    # Añadir el mensaje del usuario al historial
+    historial.append({"role": "user", "content": prompt_usuario})
+    # Recortar historial para no exceder el contexto
+    if len(historial) > MAX_HISTORIAL:
+        historial[:] = [historial[0]] + historial[-(MAX_HISTORIAL-1):]
 
-# Inicializar el historial al cargar el módulo
-inicializar_historial()
+    # Bucle principal del agente (con límite de pasos)
+    for step in range(MAX_STEPS):
+        logger.info(f"Paso {step+1}/{MAX_STEPS}")
+        logger.debug(f"Historial en paso {step+1}: {json.dumps(historial, indent=2)}")
 
-# ============================================================================
-# CONSULTA AL LLM
-# ============================================================================
-
-def consultar_llm(prompt_usuario, max_tokens=2000, temperature=0.0, guardar_historial=True, system_prompt_override=None):
-    """
-    Envía el prompt del usuario al servidor LLM y devuelve la respuesta en texto.
-    Los parámetros de generación (max_tokens, temperature, guardar_historial) controlan la salida.
-    Si guardar_historial es False, no se añade al historial (para formateo de resultados).
-    Si system_prompt_override se proporciona, se usa en lugar del system_prompt global.
-    """
-
-    # Construir mensajes
-    if system_prompt_override is not None:
-        # Usar un system_prompt diferente para esta consulta (por ejemplo, para formateo)
-        messages = [{"role": "system", "content": system_prompt_override}]
-        # Añadir el historial reciente (sin el system original) para mantener contexto
-        # Como guardar_historial=False normalmente, no se tiene historial.
-        # En formateo, no se necesita historial, solo el prompt del usuario.
-        messages.append({"role": "user", "content": prompt_usuario})
-
-    else:
-        if guardar_historial:
-            historial.append({"role": "user", "content": prompt_usuario})
-
-        # Recortar el historial si supera el límite, manteniendo el mensaje del sistema
-        if len(historial) > MAX_HISTORIAL:
-            historial[:] = [historial[0]] + historial[-(MAX_HISTORIAL-1):]
-        messages = historial
-
-    url = f"{BASE_URL}/chat/completions"
-    # Construcción del payload según la API de llama.cpp
-    payload = {
-        "model": "ignored",          # El modelo se ignora en llama.cpp (se define al levantar el servidor)
-        # "messages": historial,
-        "messages": messages,
-        "n_predict": max_tokens,
-        "temperature": temperature,
-    }
-    # headers = {"Content-Type": "application/json"}
-    data_json = json.dumps(payload).encode('utf-8')
-
-    req = urllib.request.Request(
-        url,
-        data=data_json,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-
-    try:
-        # resp = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT_HTTP)
-        # resp.raise_for_status()
-        # data = resp.json()
-        with urllib.request.urlopen(req, timeout=TIMEOUT_HTTP) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-        if "choices" in data and data["choices"]:
-            msg = data["choices"][0].get("message", {})
-            # Se prefiere 'content' o 'reasoning_content' (según el modelo)
-            respuesta = msg.get("content", "") or msg.get("reasoning_content", "")
-            if guardar_historial:
-                historial.append({"role": "assistant", "content": respuesta})
-            return respuesta
-        else:
-            logger.warning("La respuesta del LLM no contiene 'choices'.")
-            return None
-    except urllib.error.URLError as e:
-        print("Error de red al conectar con el LLM")
-        return None
-    except Exception as e:
-        print("Error inesperado en la consulta al LLM")
-        return None
-
-# ============================================================================
-# EXTRACCIÓN DEL JSON A PARTIR DE LA RESPUESTA
-# ============================================================================
-
-def extraer_json(texto):
-    """
-    Busca y extrae el primer objeto JSON válido que contenga las claves
-    'accion' y 'parametros'. Soporta JSON plano y bloques ```json.
-    """
-    if not texto:
-        return None
-
-    # Búsqueda por balance de llaves (permite anidación)
-    start = texto.find('{')
-    if start == -1:
-        return None
-
-    brace_count = 0
-    for i in range(start, len(texto)):
-        if texto[i] == '{':
-            brace_count += 1
-        elif texto[i] == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                json_str = texto[start:i+1]
-                try:
-                    data = json.loads(json_str)
-                    if "accion" in data and "parametros" in data:
-                        return data
-                except:
-                    pass
-                # Si no es válido, continuar buscando desde el siguiente carácter
-                start = i + 1
-                brace_count = 0
-
-    # Fallback: buscar bloque con ```json ... ```
-    match = re.search(r'```json\s*(\{.*?\})\s*```', texto, re.DOTALL)
-    if match:
+        # Llamar al LLM con las herramientas
         try:
-            data = json.loads(match.group(1))
-            if "accion" in data and "parametros" in data:
-                return data
-        except:
-            pass
-    return None
+            response = client.chat.completions.create(
+                model="ignored",           # El modelo se define en el servidor
+                messages=historial,
+                tools=TOOLS,
+                tool_choice="auto",        # El LLM decide si llama a una herramienta
+                temperature=0.3,
+                max_tokens=2000            # Límite para la respuesta
+            )
+        except Exception as e:
+            logger.exception(f"Error al llamar al LLM en paso {step+1}: {e}")
+            return f"Error en el paso {step+1}: {e}"
 
-# ============================================================================
-# EXTRACCIÓN DE JSON GENÉRICO (para formateo de respuestas)
-# ============================================================================
+        # Extraer el mensaje del asistente
+        message = response.choices[0].message
+        # Guardar el mensaje del asistente en el historial (si no es system_prompt_override)
+        historial.append(message.model_dump())
 
-def extraer_cualquier_json(texto):
-    """
-    Busca y extrae el primer objeto JSON válido de cualquier texto.
-    No valida que tenga claves específicas; solo devuelve el JSON.
-    """
-    if not texto:
-        return None
+        # Si el asistente no ha llamado a ninguna herramienta, su mensaje es la respuesta final
+        if not message.tool_calls:
+            if message.content:
+                return message.content
+            else:
+                # Si no hay contenido y no hay tool_calls, el LLM no sabe qué hacer
+                # Que intente de nuevo o dar un mensaje genérico
+                historial.append({"role": "user", "content": "La respuesta anterior no fue clara. Intenta resolverlo de otra manera."})
+                continue  # forzar siguiente iteración
 
-    # Búsqueda por balance de llaves
-    start = texto.find('{')
-    if start == -1:
-        return None
+        # Si el asistente llamó a herramientas, ejecutarlas y repetir
+        for call in message.tool_calls:
+            tool_name = call.function.name
+            tool_args = json.loads(call.function.arguments)
+            args_json_str = json.dumps(tool_args, sort_keys=True)
+            signature = (tool_name, args_json_str)
+            logger.info(f"Herramienta llamada: {tool_name} con argumentos: {tool_args}")
 
-    brace_count = 0
-    for i in range(start, len(texto)):
-        if texto[i] == '{':
-            brace_count += 1
-        elif texto[i] == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                json_str = texto[start:i+1]
+            # --- DETECCIÓN DE REPETICIÓN ---
+            # Si la misma llamada aparece 2 veces en las últimas 3, la bloqueamos
+            if _recent_calls.count(signature) >= 2:
+                result = "Parece que esta llamada se repite. Intenta con otra acción o da una respuesta final."
+                logger.warning(f"Repetición detectada: {signature}")
+                historial.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": result
+                })
+
+                continue  # saltar esta llamada
+
+            # Registrar la llamada actual
+            _recent_calls.append(signature)
+
+            # Obtener la función correspondiente
+            func = TOOL_FUNCTIONS.get(tool_name)
+            if not func:
+                result = f"Error: Herramienta '{tool_name}' no reconocida."
+            else:
                 try:
-                    return json.loads(json_str)
-                except:
-                    pass
-                start = i + 1
-                brace_count = 0
+                    # Ejecutar la función con los argumentos recibidos
+                    result = func(**tool_args)
+                    # Si el resultado es una tupla (uid, msg), extraer solo el mensaje
+                    if isinstance(result, tuple) and len(result) == 2:
+                        result = result[1]
+                    # Si el resultado es un diccionario con 'coincidencias', se maneja de forma especial
+                    if isinstance(result, dict) and "coincidencias" in result:
+                        # Devolvemos el resultado al main para que el usuario elija
+                        return result
+                except Exception as e:
+                    result = f"Error al ejecutar {tool_name}: {e}"
+                    logger.exception(f"Error al ejecutar {tool_name}")
 
-    # Fallback: buscar bloque con ```json ... ```
-    match = re.search(r'```json\s*(\{.*?\})\s*```', texto, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except:
-            pass
-    return None
-
-# ============================================================================
-# EJECUTOR DE ACCIÓN: LLAMA A LAS FUNCIONES DEL MÓDULO calendario_ics
-# ============================================================================
-
-def ejecutar_accion(data):
-    accion = data.get("accion")
-    params = data.get("parametros", {})
-
-    # Mapeo de nombres a funciones
-    funciones = {
-        "listar_eventos": cal.listar_eventos,
-        "buscar_eventos": cal.buscar_eventos,
-        "contar_eventos": cal.contar_eventos,  # nueva función que devuelve solo el número
-        "agregar_evento": cal.agregar_evento,
-        "eliminar_por_filtro": cal.eliminar_por_filtro,
-        "modificar_por_filtro": cal.modificar_por_filtro,
-        "eliminar_evento": cal.eliminar_evento,
-        "mostrar_evento": cal.mostrar_evento,
-        "modificar_evento": cal.modificar_evento,
-    }
-
-    if accion not in funciones:
-        return f"Acción no reconocida: {accion}"
-
-    elif accion == "eliminar_por_filtro":
-        filtros = {k: params[k] for k in ["fecha", "hora", "texto", "ubicacion", "start", "end"] if k in params}
-        ok, msg, coincidencias = cal.eliminar_por_filtro(
-            calendario=params.get("calendar"), 
-            filtros=filtros
-        )
-        if not ok and coincidencias:
-            return {
-                "mensaje": msg,
-                "coincidencias": coincidencias,
-                "accion": "delete"
+            # Añadir el resultado de la herramienta como mensaje 'tool'
+            tool_msg = {
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": str(result)
             }
-        return msg
+            historial.append(tool_msg)
 
-    elif accion == "modificar_por_filtro":
-        filtros = {k: params[k] for k in ["fecha", "hora", "texto", "ubicacion", "start", "end"] if k in params}
-        cambios = params.get("cambios", {})
-        ok, msg, coincidencias = cal.modificar_por_filtro(
-            calendario=params.get("calendar"),
-            filtros=filtros,
-            cambios=cambios
-        )
-        if not ok and coincidencias:
-            return {
-                "mensaje": msg,
-                "coincidencias": coincidencias,
-                "accion": "modify",
-                "cambios": cambios
-            }
-        return msg
-
-    # Llamar a la función con los parámetros
-    funcion = funciones[accion]
-    try:
-        resultado = funcion(**params)
-        # Si es un tuple (uid, msg), devolver msg
-        if isinstance(resultado, tuple) and len(resultado) == 2:
-            return resultado[1]
-        return resultado
-    except Exception as e:
-        return f"Error al ejecutar {accion}: {e}"
-
-
-# ============================================================================
-# FORMATEO DE RESPUESTAS CON EL LLM
-# ============================================================================
-
-# System prompt alternativo para el formateo conversacional
-SYSTEM_PROMPT_FORMATEO = """
-Eres un asistente conversacional cubano, amable y cercano. Tu única tarea es redactar respuestas para el usuario basándote en los resultados de las acciones que el sistema ha ejecutado.
-
-No generes comandos, ni acciones, ni JSON con "accion". Solo debes devolver un JSON con una clave "respuesta" que contenga un mensaje en lenguaje natural y no pienses más de 2 veces para responder.
-
-Ejemplo:
-Si el sistema te dice: "El evento se agregó correctamente con UID: 123", tu respuesta debe ser:
-{"respuesta": "¡Listo! He agregado el evento. ¿Necesitas algo más?"}
-
-Si el sistema te dice: "No se encontraron eventos", tu respuesta debe ser:
-{"respuesta": "No encontré ningún evento para esa fecha. ¿Quieres probar con otra?"}
-
-Los eventos tienen "priority" (0-9). Si el usuario pregunta por el más importante, usa buscar_eventos y luego filtra por mayor priority.
-Siempre usa un tono cálido y ofrécele ayuda adicional al final.
-"""
-
-def formatear_respuesta(resultado, prompt_usuario, accion=None):
-    """Formatea un resultado técnico en una respuesta conversacional usando el LLM."""
-    logger.info(f"Resultado técnico: {resultado}")
-    prompt_formateo = f"""
-El usuario pidió: "{prompt_usuario}"
-El sistema ejecutó la acción: "{accion if accion else 'desconocida'}"
-El resultado obtenido fue: "{resultado}"
-
-Ahora, como asistente conversacional cubano, redacta una respuesta amigable para el usuario. 
-Si {resultado} es una lista, ponla sin los UID y muestra los datos más importantes.
-Si fue exitoso, confirma con entusiasmo. Si hubo error, explícalo con empatía y sugiere alternativas.
-Si no hay eventos, dilo de manera amable.
-Termina siempre ofreciendo ayuda adicional (ej: "¿Necesitas algo más?").
-
-Responde SOLO con un JSON que contenga la clave "respuesta".
-"""
-    # Llamar al LLM con system_prompt alternativo y temperatura 0.0
-    respuesta_llm = consultar_llm(
-        prompt_formateo, 
-        guardar_historial=False, 
-        temperature=0.0,
-        system_prompt_override=SYSTEM_PROMPT_FORMATEO
-    )
-    logger.info(f"\nRespuesta del LLM para formateo: {respuesta_llm}")
-    if respuesta_llm:
-        datos_respuesta = extraer_cualquier_json(respuesta_llm)
-        logger.info(f"Datos extraídos: {datos_respuesta}")
-        if datos_respuesta and "respuesta" in datos_respuesta:
-            return datos_respuesta["respuesta"]
-    logger.warning("\nNo se pudo obtener una respuesta formateada del LLM. Usando fallback.")
-    return resultado  # fallback
+        # Si se agota el número de pasos
+    return "Límite de pasos del agente alcanzado. No se pudo resolver la solicitud."
 
 # ============================================================================
 # BUCLE PRINCIPAL DE INTERACCIÓN
@@ -419,8 +412,12 @@ Responde SOLO con un JSON que contenga la clave "respuesta".
 def main():
     """
     Bucle infinito que lee instrucciones del usuario, consulta al LLM,
-    muestra el JSON y el comando equivalente, y ejecuta la acción.
+    y maneja la selección cuando hay múltiples coincidencias.
     """
+    global historial
+
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    dia = calendar.day_name[datetime.now().weekday()]
 
     # Variables de contexto para manejar elecciones del usuario
     ultima_lista = []
@@ -428,8 +425,22 @@ def main():
     ultimos_cambios = None
     modo_seleccion = False
 
+    # Inicializar el historial de conversación con el mensaje del sistema
+    system_prompt = f"""
+Eres un asistente amable y conversacional para gestionar un calendario.
+Tienes acceso a varias herramientas para listar, buscar, agregar, modificar y eliminar eventos.
+Usa las herramientas cuando sea necesario para cumplir con la solicitud del usuario.
+Cuando el usuario pregunte por el evento más importante, busca la mayor prioridad.
+Siempre antes de eliminar confirma primero con el usuario.
+Si te falta un dato, pregunta al usuario
+Si varios eventos coinciden, muestralos y pregunta sobre cual se quiere realizar la accion.
+Siempre ofrece respuestas claras y útiles, y ofrece ayuda adicional al final.
+Hoy es {dia} {hoy}
+"""
+    historial = [{"role": "system", "content": system_prompt}]
+
     print("=" * 70)
-    print("AGENTE CONVERSACIONAL PARA GESTIONAR EVENTOS DEL CALENDARIO (con LLM)")
+    print("AGENTE de IA CONVERSACIONAL PARA GESTIONAR EVENTOS DEL CALENDARIO")
     print("=" * 70)
     print("Escribe instrucciones en lenguaje natural.")
     print("Ejemplos:")
@@ -455,30 +466,34 @@ def main():
             print("\n¡Hasta luego!")
             break
 
-        # Si está en modo selección (el usuario eligió un número)
+        # =======================================================
+        # MODO SELECCIÓN (el usuario eligió un número)
+        # =======================================================
         if modo_seleccion:
-            # Intentar extraer un número de la respuesta
             import re
             match = re.search(r'(\d+)', prompt)
             if match:
                 indice = int(match.group(1))
                 if 1 <= indice <= len(ultima_lista):
                     uid = ultima_lista[indice-1]['uid']
+                    # Ejecutar la acción correspondiente (delete o modify) directamente
                     if ultima_accion == "delete":
-                        data = {"accion": "delete", "parametros": {"uid": uid}}
+                        # Llamar a eliminar_evento con el UID
+                        ok, msg = cal.eliminar_evento(uid, calendar=None)
+                        if ok:
+                            print(f"Evento con UID {uid} eliminado.")
+                        else:
+                            print(f"Error al eliminar: {msg}")
                     elif ultima_accion == "modify":
-                        data = {"accion": "modify", "parametros": {"uid": uid, **ultimos_cambios}}
+                        # Llamar a modificar_evento con el UID y los cambios guardados
+                        ok, msg = cal.modificar_evento(uid, calendar=None, **ultimos_cambios)
+                        if ok:
+                            print(f"Evento con UID {uid} modificado.")
+                        else:
+                            print(f"Error al modificar: {msg}")
                     else:
-                        print("Lo siento, no puedo procesar esa acción.")
-                        modo_seleccion = False
-                        ultima_lista = []
-                        ultima_accion = None
-                        ultimos_cambios = None
-                        continue
-
-                    resultado = ejecutar_accion(data)
-                    respuesta_formateada = formatear_respuesta(resultado, prompt, ultima_accion)
-                    print(respuesta_formateada)
+                        print("Acción no soportada en modo selección.")
+                    # Resetear modo selección
                     modo_seleccion = False
                     ultima_lista = []
                     ultima_accion = None
@@ -491,49 +506,34 @@ def main():
                 print("Por favor, responde con el número del evento que quieres procesar.")
                 continue
 
-        logger.info(f"\nUsuario: {prompt}")   
+        # =======================================================
+        # FLUJO NORMAL: Consultar al LLM
+        # =======================================================
+        logger.info(f"\nUsuario: {prompt}")
         print("\n[*] Enviando petición al LLM...\n")
-        respuesta = consultar_llm(prompt)
-        if not respuesta:
-            logger.error("\n[!] Error en la comunicación con el LLM.")
-            print("[!] Error en la comunicación con el LLM.\n")
-            continue
 
-        # Extraer el JSON de la respuesta del modelo
-        data = extraer_json(respuesta)
-        if not data:
-            logger.error("[\n!] El LLM no devolvió un JSON válido.")
-            print("[\n!] El LLM no devolvió un JSON válido.")
-            logger.debug(f"\n[DEBUG] Respuesta del LLM: {respuesta}")
-            continue
+        # Llamar al LLM y obtener el resultado (puede ser un dict con coincidencias)
+        resultado = consultar_llm(prompt)
 
-        # Mostrar el JSON interpretado
-        logger.info("\n[*] JSON recibido:")
-        logger.info(json.dumps(data, indent=2))
-
-        # Ejecutar la acción y mostrar el resultado
-        resultado = ejecutar_accion(data)
-        # Si el resultado es una lista de "coincidencias" (porque hay múltiples) y "accion"
+        # Si el resultado es un diccionario con 'coincidencias', entramos en modo selección
         if isinstance(resultado, dict) and "coincidencias" in resultado:
             ultima_lista = resultado["coincidencias"]
-            ultima_accion = resultado["accion"]
-            ultimos_cambios = resultado.get("cambios")
+            ultima_accion = resultado.get("accion", "delete")  # por defecto delete
+            ultimos_cambios = resultado.get("cambios", {})
             modo_seleccion = True
-            print(resultado["mensaje"])
+            print(resultado.get("mensaje", "Varios eventos coinciden. Elige uno:"))
             for i, ev in enumerate(ultima_lista, 1):
                 dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
                 print(f"{i}. {ev['summary']} - {dtstart}")
             print("Responde con el número del evento que quieres procesar.")
             continue
 
+        # Si el resultado es un string, es la respuesta final del asistente
+        if isinstance(resultado, str):
+            print(resultado)
         else:
-            respuesta_formateada = formatear_respuesta(resultado, prompt, data.get('accion'))
-            print(respuesta_formateada)
+            # Fallback (no debería ocurrir)
+            print(str(resultado))
 
 if __name__ == "__main__":
-    # Verificar la existencia del módulo calendario_ics antes de iniciar
-    if not os.path.exists(os.path.join(os.path.dirname(__file__), "calendario_ics.py")):
-        logger.error("Error: No se encuentra calendario_ics.py")
-        print("Error: No se encuentra calendario_ics.py")
-        sys.exit(1)
     main()

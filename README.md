@@ -1,4 +1,6 @@
-# agente_calendario
+![Logo de agente_calendario calendario-agent](logo/logo.png)
+
+# agente_calendario calendario-agent
 
 Agente IA conversacional para gestionar eventos del calendario.
 Conversational AI agent to manage calendar events.
@@ -31,7 +33,7 @@ pip install agente_calendario
 ### Con script / With script
 ```bash
 # Para Linux / For Linux
-# Copiar el script al directorio donde está el binario
+# Copiar el script al directorio donde están los archivos .py
 # Abrir la terminal
 chmod +x install.sh
 ./install.sh
@@ -39,10 +41,23 @@ chmod +x install.sh
 
 ```bash
 # Para Windows / For Windows
-# Copiar el script al directorio donde está el binario
+# Copiar el script al directorio donde están los archivos .py
 # Abrir PowerShell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\install.ps1
+``` 
+
+### O ejecutar el binario / Or run the binary
+```bash
+# Para Linux / For Linux
+# Abrir la terminal
+./calendario-agent
+```
+
+```bash
+# Para Windows / For Windows
+# Doble click en el ejecutable
+calendario-agent.exe
 ``` 
 
 ## Configuración avanzada / Advanced configuration
@@ -134,9 +149,8 @@ The agent can use the following tools to manage your calendar:
 
 $ calendario-agent --host 127.0.0.1 --port 8082
 ======================================================================
-AGENTE CONVERSACIONAL PARA GESTIONAR EVENTOS DEL CALENDARIO (con LLM)
+AGENTE IA CONVERSACIONAL PARA GESTIONAR EVENTOS DEL CALENDARIO
 ======================================================================
-Servidor LLM: 127.0.0.1:8082
 Escribe instrucciones en lenguaje natural.
 Ejemplos:
   - 'Lista los eventos de hoy'

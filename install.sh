@@ -34,7 +34,7 @@ cat > "$DESKTOP_DIR/agente_calendario.desktop" <<EOF
 [Desktop Entry]
 Name=Agente Calendario
 Comment=Agente de IA conversacional para gestionar calendario con LLM
-Exec=$INSTALL_DIR/calendario-agent --host 127.0.0.1 --port 8082
+Exec=$INSTALL_DIR/calendario-agent
 Icon=$ICON_NAME
 Terminal=true
 Type=Application

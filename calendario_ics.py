@@ -703,7 +703,7 @@ def main():
     Proporciona una CLI con subcomandos para cada operación.
     """
     parser = argparse.ArgumentParser(description="Modulo para gestionar eventos del calendario mediante archivos .ics.")
-    subparsers = parser.add_subparsers(dest="comando", required=True)
+    subparsers = parser.add_subparsers(dest="comando")
 
     subparsers.add_parser("calendars", help="Listar calendarios")
 
@@ -776,147 +776,159 @@ def main():
 
     args = parser.parse_args()
 
-    # Ejecutar la acción correspondiente y mostrar el resultado
-    if args.comando == "calendars":
-        print(listar_calendarios())
-
-    elif args.comando == "list":
-        print(listar_eventos(args.calendar, args.start, args.end))
-
-    elif args.comando == "add":
-        evento = {
-            'summary': args.summary,
-            'description': args.description,
-            'location': args.location,
-            'priority': args.priority,
-        }
-        if args.dtstart:
-            evento['dtstart'] = parsear_fecha_hora(args.dtstart)
-        if args.dtend:
-            evento['dtend'] = parsear_fecha_hora(args.dtend)
-        uid, msg = agregar_evento(args.calendar, evento)
-        print(msg)
-
-    elif args.comando == "modify":
-        kwargs = {}
-        for key in ['summary', 'description', 'dtstart', 'dtend', 'location']:
-            val = getattr(args, key)
-            if val is not None:
-                if key in ['dtstart', 'dtend']:
-                    kwargs[key] = parsear_fecha_hora(val)
-                else:
-                    kwargs[key] = val
-        if args.priority is not None:
-            kwargs['priority'] = args.priority
-        ok, msg = modificar_evento(args.uid, args.calendar, **kwargs)
-        print(msg)
-
-    elif args.comando == "delete":
-        ok, msg = eliminar_evento(args.uid, args.calendar)
-        print(msg)
-
-    elif args.comando == "show":
-        print(mostrar_evento(args.uid, args.calendar))
-    
-    elif args.comando == "search":
-        filtros = {}
-        if args.date:
-            filtros["fecha"] = args.date
-        if args.start:
-            filtros["start"] = args.start
-        if args.end:
-            filtros["end"] = args.end
-        if args.text:
-            filtros["texto"] = args.text
-        if args.location:
-            filtros["ubicacion"] = args.location
-        if args.time:
-            filtros["hora"] = args.time
-        eventos = buscar_eventos(args.calendar, **filtros)
-        if not eventos:
-            print("No se encontraron eventos con esos criterios.")
-        else:
-            print(f"Se encontraron {len(eventos)} eventos:")
-            for i, ev in enumerate(eventos, 1):
-                dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
-                ubic = f" (Ubicación: {ev.get('location', 'N/A')})" if ev.get('location') else ""
-                print(f"{i}. {ev['summary']} - {dtstart}{ubic}")
-
-    elif args.comando == "delete-filter":
-        filtros = {}
-        if args.date:
-            filtros["fecha"] = args.date
-        if args.start:
-            filtros["start"] = args.start
-        if args.end:
-            filtros["end"] = args.end
-        if args.text:
-            filtros["texto"] = args.text
-        if args.location:
-            filtros["ubicacion"] = args.location
-        if args.time:
-            filtros["hora"] = args.time
-        if args.priority:
-                filtros["priority"] = args.priority
-        ok, msg, coincidencias = eliminar_por_filtro(args.calendar, filtros)
-        if not ok and coincidencias:
-            print(msg)
-            for i, ev in enumerate(coincidencias, 1):
-                dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
-                print(f"{i}. {ev['summary']} - {dtstart}")
-            if args.force:
-                print("Forzando eliminación de todos...")
-                for ev in coincidencias:
-                    ok2, msg2 = eliminar_evento(ev['uid'], args.calendar)
-                    print(f"  {ev['summary']}: {msg2}")
-            else:
-                print("Usa --force para eliminar todos o ejecuta delete por UID para uno específico.")
-        else:
-            print(msg)
-
-    elif args.comando == "modify-filter":
-        filtros = {}
-        if args.date:
-            filtros["fecha"] = args.date
-        if args.start:
-            filtros["start"] = args.start
-        if args.end:
-            filtros["end"] = args.end
-        if args.text:
-            filtros["texto"] = args.text
-        if args.location:
-            filtros["ubicacion"] = args.location
-        if args.time:
-            filtros["hora"] = args.time
-
-        cambios = {}
-        if args.summary:
-            cambios["summary"] = args.summary
-        if args.description:
-            cambios["description"] = args.description
-        if args.dtstart:
-            cambios["dtstart"] = parsear_fecha_hora(args.dtstart)
-        if args.dtend:
-            cambios["dtend"] = parsear_fecha_hora(args.dtend)
-        if args.set_location:
-            cambios["location"] = args.set_location
-        if args.priority is not None:
-            cambios["priority"] = args.priority
-        if not cambios:
-            print("Error: no se especificaron cambios.")
-            return
-        ok, msg, coincidencias = modificar_por_filtro(args.calendar, filtros, cambios)
-        if not ok and coincidencias:
-            print(msg)
-            for i, ev in enumerate(coincidencias, 1):
-                dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
-                print(f"{i}. {ev['summary']} - {dtstart}")
-            print("El CLI no soporta modificación interactiva. Usa el agente o modifica por UID.")
-        else:
-            print(msg)
-
+    if args.comando is None:
+        # Entrar en modo interactivo
+        while True:
+            try:
+                cmd = input("calendario-cli> ").strip()
+                if cmd in ("exit", "salir"):
+                    break
+                os.system(f"{sys.argv[0]} {cmd}")
+            except KeyboardInterrupt:
+                break
     else:
-        print(f"Comando no reconocido: {args.comando}")
+
+        # Ejecutar la acción correspondiente y mostrar el resultado
+        if args.comando == "calendars":
+            print(listar_calendarios())
+
+        elif args.comando == "list":
+            print(listar_eventos(args.calendar, args.start, args.end))
+
+        elif args.comando == "add":
+            evento = {
+                'summary': args.summary,
+                'description': args.description,
+                'location': args.location,
+                'priority': args.priority,
+            }
+            if args.dtstart:
+                evento['dtstart'] = parsear_fecha_hora(args.dtstart)
+            if args.dtend:
+                evento['dtend'] = parsear_fecha_hora(args.dtend)
+            uid, msg = agregar_evento(args.calendar, evento)
+            print(msg)
+
+        elif args.comando == "modify":
+            kwargs = {}
+            for key in ['summary', 'description', 'dtstart', 'dtend', 'location']:
+                val = getattr(args, key)
+                if val is not None:
+                    if key in ['dtstart', 'dtend']:
+                        kwargs[key] = parsear_fecha_hora(val)
+                    else:
+                        kwargs[key] = val
+            if args.priority is not None:
+                kwargs['priority'] = args.priority
+            ok, msg = modificar_evento(args.uid, args.calendar, **kwargs)
+            print(msg)
+
+        elif args.comando == "delete":
+            ok, msg = eliminar_evento(args.uid, args.calendar)
+            print(msg)
+
+        elif args.comando == "show":
+            print(mostrar_evento(args.uid, args.calendar))
+        
+        elif args.comando == "search":
+            filtros = {}
+            if args.date:
+                filtros["fecha"] = args.date
+            if args.start:
+                filtros["start"] = args.start
+            if args.end:
+                filtros["end"] = args.end
+            if args.text:
+                filtros["texto"] = args.text
+            if args.location:
+                filtros["ubicacion"] = args.location
+            if args.time:
+                filtros["hora"] = args.time
+            eventos = buscar_eventos(args.calendar, **filtros)
+            if not eventos:
+                print("No se encontraron eventos con esos criterios.")
+            else:
+                print(f"Se encontraron {len(eventos)} eventos:")
+                for i, ev in enumerate(eventos, 1):
+                    dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
+                    ubic = f" (Ubicación: {ev.get('location', 'N/A')})" if ev.get('location') else ""
+                    print(f"{i}. {ev['summary']} - {dtstart}{ubic}")
+
+        elif args.comando == "delete-filter":
+            filtros = {}
+            if args.date:
+                filtros["fecha"] = args.date
+            if args.start:
+                filtros["start"] = args.start
+            if args.end:
+                filtros["end"] = args.end
+            if args.text:
+                filtros["texto"] = args.text
+            if args.location:
+                filtros["ubicacion"] = args.location
+            if args.time:
+                filtros["hora"] = args.time
+            if args.priority:
+                    filtros["priority"] = args.priority
+            ok, msg, coincidencias = eliminar_por_filtro(args.calendar, filtros)
+            if not ok and coincidencias:
+                print(msg)
+                for i, ev in enumerate(coincidencias, 1):
+                    dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
+                    print(f"{i}. {ev['summary']} - {dtstart}")
+                if args.force:
+                    print("Forzando eliminación de todos...")
+                    for ev in coincidencias:
+                        ok2, msg2 = eliminar_evento(ev['uid'], args.calendar)
+                        print(f"  {ev['summary']}: {msg2}")
+                else:
+                    print("Usa --force para eliminar todos o ejecuta delete por UID para uno específico.")
+            else:
+                print(msg)
+
+        elif args.comando == "modify-filter":
+            filtros = {}
+            if args.date:
+                filtros["fecha"] = args.date
+            if args.start:
+                filtros["start"] = args.start
+            if args.end:
+                filtros["end"] = args.end
+            if args.text:
+                filtros["texto"] = args.text
+            if args.location:
+                filtros["ubicacion"] = args.location
+            if args.time:
+                filtros["hora"] = args.time
+
+            cambios = {}
+            if args.summary:
+                cambios["summary"] = args.summary
+            if args.description:
+                cambios["description"] = args.description
+            if args.dtstart:
+                cambios["dtstart"] = parsear_fecha_hora(args.dtstart)
+            if args.dtend:
+                cambios["dtend"] = parsear_fecha_hora(args.dtend)
+            if args.set_location:
+                cambios["location"] = args.set_location
+            if args.priority is not None:
+                cambios["priority"] = args.priority
+            if not cambios:
+                print("Error: no se especificaron cambios.")
+                return
+            ok, msg, coincidencias = modificar_por_filtro(args.calendar, filtros, cambios)
+            if not ok and coincidencias:
+                print(msg)
+                for i, ev in enumerate(coincidencias, 1):
+                    dtstart = ev['dtstart'].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get('dtstart'), datetime) else "Sin fecha"
+                    print(f"{i}. {ev['summary']} - {dtstart}")
+                print("El CLI no soporta modificación interactiva. Usa el agente o modifica por UID.")
+            else:
+                print(msg)
+
+        else:
+            print(f"Comando no reconocido: {args.comando}")
 
 if __name__ == "__main__":
     main()

@@ -65,18 +65,24 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Agente calendario con LLM (usando tool_calls)")
+    parser = argparse.ArgumentParser(description="Agente IA para gestionar eventos en el calendario con LLM")
     parser.add_argument(
         "--host",
-        help="Dirección del servidor LLM (ej: 127.0.0.1)",
-        default=os.getenv("LLAMA_HOST", "127.0.0.1")
+        help="Dirección del servidor LLM (ej: 127.0.0.1)"
     )
     parser.add_argument(
         "--port",
-        help="Puerto del servidor LLM (ej: 8082)",
-        default=os.getenv("LLAMA_PORT", "8082")
+        help="Puerto del servidor LLM (ej: 8080)"
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Si no se pasan argumentos, preguntar al usuario
+    if not args.host:
+        args.host = input("Host [127.0.0.1]: ").strip() or "127.0.0.1"
+    if not args.port:
+        args.port = input("Port [8080]: ").strip() or "8080"
+
+    return args
 
 args = parse_args()
 HOST = args.host

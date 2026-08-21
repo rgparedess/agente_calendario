@@ -1,12 +1,13 @@
 # CHANGELOG - agente_calendario
 
-## [3.0.0] - 2026-08-20
+## [3.0.0] - 2026-08-21
 
 ### Added
 - **Integración con la librería oficial `openai`**: Uso de `tool_calls` para comunicación con `llama.cpp`.
 - **Límite de pasos (`MAX_STEPS`)**: Control de iteraciones (por defecto 15).
 - **Detección de repetición**: Bloqueo de llamadas repetidas con los mismos argumentos.
 - **Manejo de múltiples `tool_calls` en paralelo**: Procesamiento eficiente de varias herramientas en una misma iteración.
+- Se corrigió un error que impedía la ejecución del binario en Windows": si hubo un bug específico relacionado con el empaquetado.
 
 ### Changed
 - **Estructura del agente**: Reemplazo del JSON manual por `tool_calls` de OpenAI.

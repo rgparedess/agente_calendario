@@ -16,7 +16,6 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/rgparedess/agente_calendario",
-    include_package_data=True,
     py_modules=["agente_calendario"],
     license="MIT",
     classifiers=[

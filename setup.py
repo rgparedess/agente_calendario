@@ -3,16 +3,9 @@
 
 from setuptools import setup, find_packages
 
-import os
-
 long_description = ""
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
-
-if os.path.exists("CHANGELOG.md"):
-    with open("CHANGELOG.md", "r", encoding="utf-8") as fh:
-        changelog = fh.read()
-        long_description += "\n\n---\n\n## Historial de Cambios\n\n" + changelog
 
 setup(
     name="agente_calendario",
